@@ -9,6 +9,9 @@
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://api.pray-times.com/*" }]
-    }
+    },
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

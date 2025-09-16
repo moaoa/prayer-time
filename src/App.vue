@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
+import { enable } from "@tauri-apps/plugin-autostart";
 
 // Declare Tauri global type
 declare global {
@@ -362,6 +363,7 @@ function onPrayerNameClick() {
 }
 
 onMounted(async () => {
+  await enable();
   await fetchPrayerTimes();
   await requestNotificationPermission();
   startTimeUpdates();
