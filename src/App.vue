@@ -355,6 +355,29 @@ const translatePrayerNameToArabic = (name: string) => {
       return name;
   }
 };
+
+const translateCityNameToArabic = (name: string) => {
+  switch (name.toLowerCase()) {
+    case "Tripoli":
+      return "طرابلس";
+    case "Zawia":
+      return "الزاويةj";
+    case "Ejdabya":
+      return "إجدابيا";
+    case "Khumes":
+      return "الخمس";
+    case "Misrata":
+      return "مصراتة";
+    case "Sabha":
+      return "سبها";
+    case "Sert":
+      return "سرت";
+    case "Benghazi":
+      return "بنغازي";
+    default:
+      return name;
+  }
+};
 </script>
 
 <template>
@@ -371,7 +394,7 @@ const translatePrayerNameToArabic = (name: string) => {
         <div class="location">
           <select v-model="selectedCity">
             <option v-for="city in cities" :key="city" :value="city">
-              {{ city }}
+              {{ translateCityNameToArabic(city) }}
             </option>
           </select>
         </div>
