@@ -3,12 +3,31 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-    "permissions": [
+  "permissions": [
     "core:default",
     "opener:default",
     "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    "os:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "notify-send",
+          "cmd": "notify-send",
+          "args": [
+            {
+              "validator": ".*"
+            },
+            {
+              "validator": ".*"
+            }
+          ]
+        }
+      ]
+    }
   ]
 }

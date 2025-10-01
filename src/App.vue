@@ -7,6 +7,8 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { platform } from "@tauri-apps/plugin-os";
+import { Command } from "@tauri-apps/plugin-shell";
 
 // Declare Tauri global type
 declare global {
@@ -57,12 +59,11 @@ watch(selectedCity, (newCity) => {
 const currentTime = ref(new Date());
 const isCompactMode = ref(false);
 const notificationShown = ref<string>("");
-const isManualToggle = ref(false); // Track if user manually toggled
-const showNextPrayer = ref(true); // true = show next prayer, false = show previous prayer
+const isManualToggle = ref(false);
+const showNextPrayer = ref(true);
 
 let timeInterval: number | null = null;
 
-// Prayer names in order
 const prayerOrder = ["fajer", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
 
 const todayPrayerTimings = computed(() => {
@@ -79,7 +80,6 @@ const todayPrayerTimings = computed(() => {
   return todayData;
 });
 
-// Convert prayer time string to Date object for today
 function prayerTimeToDate(timeStr: string): Date {
   const [hoursAndMinutes, unit] = timeStr.split(" ");
   const [hours, minutes] = hoursAndMinutes.split(":").map(Number);
@@ -91,7 +91,6 @@ function prayerTimeToDate(timeStr: string): Date {
   return date;
 }
 
-// Get next prayer
 const nextPrayer = computed(() => {
   if (!todayPrayerTimings.value) return null;
 
@@ -101,9 +100,6 @@ const nextPrayer = computed(() => {
     const prayerTime = prayerTimeToDate(
       todayPrayerTimings.value[prayer as keyof PrayerTimings]
     );
-    console.log("prayerTime: ", prayerTime);
-    console.log("now: ", now);
-    console.log("===================================");
 
     if (prayerTime > now) {
       return {
@@ -114,7 +110,6 @@ const nextPrayer = computed(() => {
     }
   }
 
-  // If no prayer today, return first prayer of tomorrow
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const fajrTime = prayerTimeToDate(todayPrayerTimings.value.fajer);
@@ -127,7 +122,6 @@ const nextPrayer = computed(() => {
   };
 });
 
-// Get previous prayer
 const previousPrayer = computed(() => {
   if (!todayPrayerTimings.value) return null;
 
@@ -150,7 +144,6 @@ const previousPrayer = computed(() => {
     }
   }
 
-  // If no prayer passed today, get last prayer from yesterday
   if (!lastPrayer) {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -276,11 +269,21 @@ function checkNotification() {
 
 // Show browser notification
 async function showNotification(title: string, body: string) {
+  const currentPlatform = platform();
+
+  if (currentPlatform == "linux") {
+    const result = Command.create("notify-send", [title, body]).execute();
+
+    console.log(result);
+    return;
+  }
+
   let permissionGranted = await isPermissionGranted();
   if (!permissionGranted) {
     const permission = await requestPermission();
     permissionGranted = permission === "granted";
   }
+  console.log("Permission granted:", permissionGranted, title, body);
   if (permissionGranted) {
     sendNotification({ title, body, icon: "/prayer-icon.png" });
   }
@@ -353,6 +356,11 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
+        <button
+          @click="showNotification('test', 'the body of the notification')"
+        >
+          notifications test
+        </button>
         <div class="current-time">
           {{ formatTime(currentTime) }}
         </div>
@@ -440,6 +448,12 @@ onUnmounted(() => {
   </main>
 </template>
 
+<style>
+body {
+  margin: 0;
+  padding: 0;
+}
+</style>
 <style scoped>
 .container {
   margin: 0;
