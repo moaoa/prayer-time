@@ -85,7 +85,7 @@ function prayerTimeToDate(timeStr: string): Date {
   const [hours, minutes] = hoursAndMinutes.split(":").map(Number);
   const date = new Date();
   date.setHours(hours, minutes, 0, 0);
-  if (unit === "pm") {
+  if (unit === "pm" && hours !== 12) {
     date.setHours(date.getHours() + 12);
   }
   return date;
@@ -383,23 +383,26 @@ const translateCityNameToArabic = (name: string) => {
 <template>
   <main :class="['container', { compact: isCompactMode }]">
     <div class="window-controls">
-      <button @click="toggleCompactMode" class="mode-toggle">
+      <!-- <button @click="toggleCompactMode" class="mode-toggle">
         {{ isCompactMode ? "🔍" : "📱" }}
-      </button>
+      </button> -->
     </div>
 
     <div v-if="todayPrayerTimings" class="prayer-content">
       <div class="header">
         <h1 v-if="!isCompactMode">وقت الصلاة</h1>
+        <div class="current-time">
+          {{ formatTime(currentTime) }}
+        </div>
+
+        <h3>المدينة</h3>
+
         <div class="location">
           <select v-model="selectedCity">
             <option v-for="city in cities" :key="city" :value="city">
               {{ translateCityNameToArabic(city) }}
             </option>
           </select>
-        </div>
-        <div class="current-time">
-          {{ formatTime(currentTime) }}
         </div>
       </div>
 
@@ -417,7 +420,7 @@ const translateCityNameToArabic = (name: string) => {
                 : 'انقر لعرض الوقت المتبقي إلى الصلاة القادمة'
             "
           >
-            {{ activePrayer.name }}
+            {{ translatePrayerNameToArabic(activePrayer.name) }}
             <span class="toggle-hint">🔄</span>
           </div>
           <div class="prayer-time">{{ activePrayer.timeString }}</div>
