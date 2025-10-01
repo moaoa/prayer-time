@@ -1,0 +1,1 @@
+pnpm tauri build && DEB_FILE=$(find src-tauri/target/release/bundle/deb -name "*.deb" | head -1) && sudo dpkg -i "$DEB_FILE"

@@ -336,6 +336,25 @@ onUnmounted(() => {
     clearInterval(timeInterval);
   }
 });
+
+const translatePrayerNameToArabic = (name: string) => {
+  switch (name.toLowerCase()) {
+    case "fajer":
+      return "الفجر";
+    case "dhuhr":
+      return "الظهر";
+    case "asr":
+      return "العصر";
+    case "maghrib":
+      return "المغرب";
+    case "isha":
+      return "العشاء";
+    case "sunrise":
+      return "الشروق";
+    default:
+      return name;
+  }
+};
 </script>
 
 <template>
@@ -348,7 +367,7 @@ onUnmounted(() => {
 
     <div v-if="todayPrayerTimings" class="prayer-content">
       <div class="header">
-        <h1 v-if="!isCompactMode">Prayer Times</h1>
+        <h1 v-if="!isCompactMode">وقت الصلاة</h1>
         <div class="location">
           <select v-model="selectedCity">
             <option v-for="city in cities" :key="city" :value="city">
@@ -356,11 +375,6 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        <button
-          @click="showNotification('test', 'the body of the notification')"
-        >
-          notifications test
-        </button>
         <div class="current-time">
           {{ formatTime(currentTime) }}
         </div>
@@ -368,7 +382,7 @@ onUnmounted(() => {
 
       <div v-if="activePrayer" class="next-prayer">
         <h2 v-if="!isCompactMode">
-          {{ shouldShowNextPrayer ? "Next Prayer" : "Previous Prayer" }}
+          {{ shouldShowNextPrayer ? "الصلاة القادمة" : "الصلاة السابقة" }}
         </h2>
         <div class="prayer-info">
           <div
@@ -376,8 +390,8 @@ onUnmounted(() => {
             @click="onPrayerNameClick"
             :title="
               shouldShowNextPrayer
-                ? 'Click to show time since previous prayer'
-                : 'Click to show time to next prayer'
+                ? 'انقر لعرض الوقت المضت من الصلاة السابقة'
+                : 'انقر لعرض الوقت المتبقي إلى الصلاة القادمة'
             "
           >
             {{ activePrayer.name }}
@@ -388,39 +402,39 @@ onUnmounted(() => {
 
         <div v-if="activeTimeDisplay" class="countdown">
           <div class="countdown-title" v-if="!isCompactMode">
-            {{ shouldShowNextPrayer ? "Time Remaining" : "Time Passed" }}
+            {{ shouldShowNextPrayer ? "الوقت المتبقي" : "الوقت المضت" }}
           </div>
           <div class="countdown-time">
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.hours.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">h</span>
+              <span class="label" v-if="!isCompactMode">س</span>
             </span>
             <span class="separator">:</span>
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.minutes.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">m</span>
+              <span class="label" v-if="!isCompactMode">د</span>
             </span>
             <span class="separator">:</span>
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.seconds.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">s</span>
+              <span class="label" v-if="!isCompactMode">ث</span>
             </span>
           </div>
           <div class="mode-indicator" v-if="!isCompactMode">
-            <span :class="{ active: shouldShowNextPrayer }">⏭️ Next</span>
-            <span :class="{ active: !shouldShowNextPrayer }">⏮️ Previous</span>
+            <span :class="{ active: shouldShowNextPrayer }">⏭️ القادمة</span>
+            <span :class="{ active: !shouldShowNextPrayer }">⏮️ السابقة</span>
           </div>
         </div>
       </div>
 
       <div v-if="!isCompactMode" class="all-prayers">
-        <h3>Today's Prayer Times</h3>
+        <h3>وقت الصلاة لهذا اليوم</h3>
         <div class="prayers-grid">
           <div
             v-for="prayer in prayerOrder"
@@ -434,7 +448,9 @@ onUnmounted(() => {
               },
             ]"
           >
-            <div class="prayer-name">{{ prayer }}</div>
+            <div class="prayer-name">
+              {{ translatePrayerNameToArabic(prayer) }}
+            </div>
             <div class="prayer-time">
               {{ todayPrayerTimings[prayer as keyof PrayerTimings] }}
             </div>
@@ -443,7 +459,7 @@ onUnmounted(() => {
       </div>
     </div>
     <div v-else class="loading">
-      <p>No prayer times found for today.</p>
+      <p>لا توجد أوقات الصلاة لهذا اليوم.</p>
     </div>
   </main>
 </template>
