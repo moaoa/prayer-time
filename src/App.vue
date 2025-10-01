@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { enable } from "@tauri-apps/plugin-autostart";
+import prayerTimesData from "./assets/prayer_times.json";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 
 // Declare Tauri global type
 declare global {
@@ -10,39 +16,45 @@ declare global {
 }
 
 interface PrayerTimings {
-  Fajr: string;
-  Sunrise: string;
-  Duhur: string;
-  Asr: string;
-  Maqhrib: string;
-  Isha: string;
+  fajer: string;
+  sunrise: string;
+  dhuhr: string;
+  asr: string;
+  maghrib: string;
+  isha: string;
 }
 
-interface PrayerResponse {
-  timings: PrayerTimings;
-  meta: {
-    countryAR: string;
-    countryEN: string;
-    cityAR: string;
-    cityEN: string;
-    timezone: string;
-    lat: string;
-    long: string;
-    zone: number;
-    ARdayName: string;
-    ENdayName: string;
-    HIJRIdate: string;
-    GEOIdate: string;
-    TimeNow: string;
-    TimeNow24: string;
-    timeStamp: number;
-  };
+interface PrayerDay {
+  date: string;
+  fajer: string;
+  sunrise: string;
+  dhuhr: string;
+  asr: string;
+  maghrib: string;
+  isha: string;
 }
 
-const prayerData = ref<PrayerResponse | null>(null);
+const prayerData = ref<Record<string, PrayerDay[]>>(prayerTimesData);
+
+const cities = computed(() => Object.keys(prayerData.value));
+
+const defaultCity = "Tripoli";
+
+const storedCity = localStorage.getItem("selectedCity");
+
+const selectedCity = ref(
+  storedCity && cities.value.includes(storedCity)
+    ? storedCity
+    : cities.value.includes(defaultCity)
+    ? defaultCity
+    : cities.value[0] || ""
+);
+
+watch(selectedCity, (newCity) => {
+  localStorage.setItem("selectedCity", newCity);
+});
+
 const currentTime = ref(new Date());
-const loading = ref(true);
-const error = ref<string>("");
 const isCompactMode = ref(false);
 const notificationShown = ref<string>("");
 const isManualToggle = ref(false); // Track if user manually toggled
@@ -51,90 +63,53 @@ const showNextPrayer = ref(true); // true = show next prayer, false = show previ
 let timeInterval: number | null = null;
 
 // Prayer names in order
-const prayerOrder = ["Fajr", "Sunrise", "Duhur", "Asr", "Maqhrib", "Isha"];
+const prayerOrder = ["fajer", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
 
-// Function to fetch prayer times from API
-async function fetchPrayerTimes() {
-  try {
-    loading.value = true;
-    error.value = "";
-
-    const apiUrl = import.meta.env.VITE_PRAYER_API_URL;
-    if (!apiUrl) {
-      throw new Error("API URL not found in environment variables");
-    }
-
-    console.log("Fetching from:", apiUrl);
-    console.log("Tauri internals available:", !!window.__TAURI_INTERNALS__);
-
-    let response;
-
-    // Check if we're in Tauri environment
-    if (window.__TAURI_INTERNALS__) {
-      // Use Tauri's HTTP client for CORS-free requests (production)
-      console.log("Using Tauri HTTP client");
-      const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
-      response = await tauriFetch(apiUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-      console.log("Tauri response status:", response.status);
-    } else {
-      // Fallback to regular fetch (development with proxy)
-      console.log("Using regular fetch with proxy");
-      const devApiUrl = apiUrl.includes("api.pray-times.com")
-        ? "/api/prayer?country=libya&city=tripoli"
-        : apiUrl;
-      console.log("Dev API URL:", devApiUrl);
-      response = await fetch(devApiUrl);
-      console.log("Dev response status:", response.status);
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP error! status: ${response.status} - ${response.statusText}`
-      );
-    }
-
-    const data: PrayerResponse = await response.json();
-    prayerData.value = data;
-    console.log("Prayer times fetched successfully:", data);
-  } catch (err) {
-    console.error("Detailed error:", err);
-    error.value =
-      err instanceof Error ? err.message : "Failed to fetch prayer times";
-    console.error("Error fetching prayer times:", err);
-  } finally {
-    loading.value = false;
+const todayPrayerTimings = computed(() => {
+  if (!selectedCity.value || !prayerData.value[selectedCity.value]) {
+    return null;
   }
-}
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const formattedDate = `${month}-${day}`;
+  const todayData = prayerData.value[selectedCity.value].find(
+    (day) => day.date === formattedDate
+  );
+  return todayData;
+});
 
 // Convert prayer time string to Date object for today
 function prayerTimeToDate(timeStr: string): Date {
-  const [hours, minutes] = timeStr.split(":").map(Number);
+  const [hoursAndMinutes, unit] = timeStr.split(" ");
+  const [hours, minutes] = hoursAndMinutes.split(":").map(Number);
   const date = new Date();
   date.setHours(hours, minutes, 0, 0);
+  if (unit === "pm") {
+    date.setHours(date.getHours() + 12);
+  }
   return date;
 }
 
 // Get next prayer
 const nextPrayer = computed(() => {
-  if (!prayerData.value) return null;
+  if (!todayPrayerTimings.value) return null;
 
   const now = currentTime.value;
 
   for (const prayer of prayerOrder) {
     const prayerTime = prayerTimeToDate(
-      prayerData.value.timings[prayer as keyof PrayerTimings]
+      todayPrayerTimings.value[prayer as keyof PrayerTimings]
     );
+    console.log("prayerTime: ", prayerTime);
+    console.log("now: ", now);
+    console.log("===================================");
 
     if (prayerTime > now) {
       return {
         name: prayer,
         time: prayerTime,
-        timeString: prayerData.value.timings[prayer as keyof PrayerTimings],
+        timeString: todayPrayerTimings.value[prayer as keyof PrayerTimings],
       };
     }
   }
@@ -142,33 +117,33 @@ const nextPrayer = computed(() => {
   // If no prayer today, return first prayer of tomorrow
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const fajrTime = prayerTimeToDate(prayerData.value.timings.Fajr);
+  const fajrTime = prayerTimeToDate(todayPrayerTimings.value.fajer);
   fajrTime.setDate(tomorrow.getDate());
 
   return {
-    name: "Fajr",
+    name: "fajer",
     time: fajrTime,
-    timeString: prayerData.value.timings.Fajr,
+    timeString: todayPrayerTimings.value.fajer,
   };
 });
 
 // Get previous prayer
 const previousPrayer = computed(() => {
-  if (!prayerData.value) return null;
+  if (!todayPrayerTimings.value) return null;
 
   const now = currentTime.value;
   let lastPrayer = null;
 
   for (const prayer of prayerOrder) {
     const prayerTime = prayerTimeToDate(
-      prayerData.value.timings[prayer as keyof PrayerTimings]
+      todayPrayerTimings.value[prayer as keyof PrayerTimings]
     );
 
     if (prayerTime <= now) {
       lastPrayer = {
         name: prayer,
         time: prayerTime,
-        timeString: prayerData.value.timings[prayer as keyof PrayerTimings],
+        timeString: todayPrayerTimings.value[prayer as keyof PrayerTimings],
       };
     } else {
       break;
@@ -179,13 +154,13 @@ const previousPrayer = computed(() => {
   if (!lastPrayer) {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
-    const ishaTime = prayerTimeToDate(prayerData.value.timings.Isha);
+    const ishaTime = prayerTimeToDate(todayPrayerTimings.value.isha);
     ishaTime.setDate(yesterday.getDate());
 
     return {
-      name: "Isha",
+      name: "isha",
       time: ishaTime,
-      timeString: prayerData.value.timings.Isha,
+      timeString: todayPrayerTimings.value.isha,
     };
   }
 
@@ -257,13 +232,6 @@ function togglePrayerMode() {
   showNextPrayer.value = !showNextPrayer.value;
 }
 
-// Reset to automatic mode after some time
-// function resetToAutoMode() {
-//   setTimeout(() => {
-//     isManualToggle.value = false;
-//   }, 60000); // Reset after 1 minute
-// }
-
 // Show notification when prayer is close (5 minutes before)
 function checkNotification() {
   if (!timeRemaining.value || !nextPrayer.value) return;
@@ -308,28 +276,21 @@ function checkNotification() {
 
 // Show browser notification
 async function showNotification(title: string, body: string) {
-  if ("Notification" in window) {
-    if (Notification.permission === "granted") {
-      new Notification(title, {
-        body,
-        icon: "/prayer-icon.png",
-      });
-    } else if (Notification.permission !== "denied") {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        new Notification(title, {
-          body,
-          icon: "/prayer-icon.png",
-        });
-      }
-    }
+  let permissionGranted = await isPermissionGranted();
+  if (!permissionGranted) {
+    const permission = await requestPermission();
+    permissionGranted = permission === "granted";
+  }
+  if (permissionGranted) {
+    sendNotification({ title, body, icon: "/prayer-icon.png" });
   }
 }
 
 // Request notification permission on mount
 async function requestNotificationPermission() {
-  if ("Notification" in window && Notification.permission === "default") {
-    await Notification.requestPermission();
+  let permissionGranted = await isPermissionGranted();
+  if (!permissionGranted) {
+    await requestPermission();
   }
 }
 
@@ -359,12 +320,10 @@ function toggleCompactMode() {
 // Handle prayer name click
 function onPrayerNameClick() {
   togglePrayerMode();
-  // resetToAutoMode();
 }
 
 onMounted(async () => {
   await enable();
-  await fetchPrayerTimes();
   await requestNotificationPermission();
   startTimeUpdates();
 });
@@ -382,27 +341,17 @@ onUnmounted(() => {
       <button @click="toggleCompactMode" class="mode-toggle">
         {{ isCompactMode ? "🔍" : "📱" }}
       </button>
-      <button @click="fetchPrayerTimes" class="refresh-btn" :disabled="loading">
-        {{ loading ? "⟳" : "🔄" }}
-      </button>
     </div>
 
-    <div v-if="loading" class="loading">
-      <p>Loading prayer times...</p>
-    </div>
-
-    <div v-else-if="error" class="error">
-      <p>{{ error }}</p>
-      <button @click="fetchPrayerTimes">Retry</button>
-    </div>
-
-    <div v-else-if="prayerData" class="prayer-content">
+    <div v-if="todayPrayerTimings" class="prayer-content">
       <div class="header">
         <h1 v-if="!isCompactMode">Prayer Times</h1>
         <div class="location">
-          <span
-            >{{ prayerData.meta.cityAR }} - {{ prayerData.meta.cityEN }}</span
-          >
+          <select v-model="selectedCity">
+            <option v-for="city in cities" :key="city" :value="city">
+              {{ city }}
+            </option>
+          </select>
         </div>
         <div class="current-time">
           {{ formatTime(currentTime) }}
@@ -479,11 +428,14 @@ onUnmounted(() => {
           >
             <div class="prayer-name">{{ prayer }}</div>
             <div class="prayer-time">
-              {{ prayerData.timings[prayer as keyof PrayerTimings] }}
+              {{ todayPrayerTimings[prayer as keyof PrayerTimings] }}
             </div>
           </div>
         </div>
       </div>
+    </div>
+    <div v-else class="loading">
+      <p>No prayer times found for today.</p>
     </div>
   </main>
 </template>
@@ -788,12 +740,6 @@ onUnmounted(() => {
   background: rgba(76, 175, 80, 0.3);
   border: 2px solid rgba(76, 175, 80, 0.5);
   box-shadow: 0 0 20px rgba(76, 175, 80, 0.3);
-}
-
-.prayer-item.previous {
-  background: rgba(255, 152, 0, 0.3);
-  border: 2px solid rgba(255, 152, 0, 0.5);
-  box-shadow: 0 0 20px rgba(255, 152, 0, 0.3);
 }
 
 .prayer-item.current {

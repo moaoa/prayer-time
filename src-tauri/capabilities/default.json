@@ -6,10 +6,7 @@
     "permissions": [
     "core:default",
     "opener:default",
-    {
-      "identifier": "http:default",
-      "allow": [{ "url": "https://api.pray-times.com/*" }]
-    },
+    "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
