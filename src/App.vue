@@ -3,6 +3,12 @@ import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { enable } from "@tauri-apps/plugin-autostart";
 import prayerTimesData from "./assets/prayer_times.json";
 import {
+  currentMonitor,
+  getCurrentWindow,
+  LogicalPosition,
+  LogicalSize,
+} from "@tauri-apps/api/window";
+import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
@@ -57,7 +63,8 @@ watch(selectedCity, (newCity) => {
 });
 
 const currentTime = ref(new Date());
-const isCompactMode = ref(false);
+const storedMiniMode = localStorage.getItem("isMiniMode") === "1";
+const isMiniMode = ref(storedMiniMode);
 const notificationShown = ref<string>("");
 const isManualToggle = ref(false);
 const showNextPrayer = ref(true);
@@ -65,6 +72,159 @@ const showNextPrayer = ref(true);
 let timeInterval: number | null = null;
 
 const prayerOrder = ["fajer", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
+
+type WindowBounds = { x: number; y: number; width: number; height: number };
+
+let unlistenMoved: null | (() => void) = null;
+let unlistenResized: null | (() => void) = null;
+let snapDebounceTimer: number | null = null;
+let isSnapping = false;
+
+function readBounds(key: string): WindowBounds | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as WindowBounds;
+    if (
+      typeof parsed?.x !== "number" ||
+      typeof parsed?.y !== "number" ||
+      typeof parsed?.width !== "number" ||
+      typeof parsed?.height !== "number"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBounds(key: string, bounds: WindowBounds) {
+  localStorage.setItem(key, JSON.stringify(bounds));
+}
+
+async function getCurrentBounds(): Promise<WindowBounds | null> {
+  try {
+    const win = getCurrentWindow();
+    const pos = await win.outerPosition();
+    const size = await win.outerSize();
+    return {
+      x: pos.x,
+      y: pos.y,
+      width: size.width,
+      height: size.height,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function applyMiniModeWindowBehavior(enabled: boolean) {
+  const win = getCurrentWindow();
+
+  if (enabled) {
+    const bounds = await getCurrentBounds();
+    if (bounds) writeBounds("normalBounds", bounds);
+
+    try {
+      await win.setDecorations(false);
+      await win.setAlwaysOnTop(true);
+      await win.setResizable(false);
+    } catch (e) {
+      console.warn("[mini-mode] Failed to apply window flags", e);
+    }
+
+    const miniBounds = readBounds("miniBounds");
+    if (miniBounds) {
+      await win.setSize(new LogicalSize(miniBounds.width, miniBounds.height));
+      await win.setPosition(new LogicalPosition(miniBounds.x, miniBounds.y));
+    } else {
+      await win.setSize(new LogicalSize(260, 72));
+    }
+  } else {
+    try {
+      await win.setResizable(true);
+      await win.setAlwaysOnTop(false);
+      await win.setDecorations(true);
+    } catch (e) {
+      console.warn("[mini-mode] Failed to restore window flags", e);
+    }
+
+    const normalBounds = readBounds("normalBounds");
+    if (normalBounds) {
+      await win.setSize(
+        new LogicalSize(normalBounds.width, normalBounds.height)
+      );
+      await win.setPosition(new LogicalPosition(normalBounds.x, normalBounds.y));
+    }
+  }
+}
+
+function toggleMiniMode() {
+  isMiniMode.value = !isMiniMode.value;
+}
+
+async function closeApplication() {
+  await getCurrentWindow().close();
+}
+
+async function snapMiniWindowToEdgeIfNear() {
+  if (!isMiniMode.value) return;
+
+  const win = getCurrentWindow();
+  const [pos, size, monitor] = await Promise.all([
+    win.outerPosition(),
+    win.outerSize(),
+    currentMonitor(),
+  ]);
+
+  if (!monitor) return;
+
+  const mx = monitor.position.x;
+  const my = monitor.position.y;
+  const mw = monitor.size.width;
+  const mh = monitor.size.height;
+
+  const leftDist = Math.abs(pos.x - mx);
+  const rightDist = Math.abs(pos.x + size.width - (mx + mw));
+  const topDist = Math.abs(pos.y - my);
+  const bottomDist = Math.abs(pos.y + size.height - (my + mh));
+
+  const threshold = 16;
+  const minDist = Math.min(leftDist, rightDist, topDist, bottomDist);
+  if (minDist > threshold) return;
+
+  let newX = pos.x;
+  let newY = pos.y;
+
+  switch (minDist) {
+    case leftDist:
+      newX = mx;
+      break;
+    case rightDist:
+      newX = mx + mw - size.width;
+      break;
+    case topDist:
+      newY = my;
+      break;
+    case bottomDist:
+      newY = my + mh - size.height;
+      break;
+  }
+
+  isSnapping = true;
+  try {
+    await win.setPosition(new LogicalPosition(newX, newY));
+  } finally {
+    isSnapping = false;
+  }
+}
+
+async function persistMiniBounds() {
+  if (!isMiniMode.value) return;
+  const bounds = await getCurrentBounds();
+  if (bounds) writeBounds("miniBounds", bounds);
+}
 
 const todayPrayerTimings = computed(() => {
   if (!selectedCity.value || !prayerData.value[selectedCity.value]) {
@@ -315,11 +475,6 @@ function startTimeUpdates() {
   }, 1000);
 }
 
-// Toggle compact mode
-function toggleCompactMode() {
-  isCompactMode.value = !isCompactMode.value;
-}
-
 // Handle prayer name click
 function onPrayerNameClick() {
   togglePrayerMode();
@@ -329,12 +484,49 @@ onMounted(async () => {
   await enable();
   await requestNotificationPermission();
   startTimeUpdates();
+
+  if (platform() === "linux") {
+    console.warn(
+      "[mini-mode] Note: always-on-top can be unreliable on Wayland. If it doesn't work, try: env XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= npm run tauri dev"
+    );
+  }
+
+  // Apply persisted mini mode on startup.
+  await applyMiniModeWindowBehavior(isMiniMode.value);
+
+  const win = getCurrentWindow();
+  unlistenMoved = await win.onMoved(async () => {
+    if (!isMiniMode.value || isSnapping) return;
+    if (snapDebounceTimer) window.clearTimeout(snapDebounceTimer);
+    snapDebounceTimer = window.setTimeout(async () => {
+      try {
+        await snapMiniWindowToEdgeIfNear();
+        await persistMiniBounds();
+      } catch {
+        // ignore
+      }
+    }, 200);
+  });
+
+  unlistenResized = await win.onResized(async () => {
+    if (!isMiniMode.value) return;
+    await persistMiniBounds();
+  });
 });
 
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
   }
+
+  if (unlistenMoved) unlistenMoved();
+  if (unlistenResized) unlistenResized();
+  if (snapDebounceTimer) window.clearTimeout(snapDebounceTimer);
+});
+
+watch(isMiniMode, async (enabled) => {
+  localStorage.setItem("isMiniMode", enabled ? "1" : "0");
+  await applyMiniModeWindowBehavior(enabled);
 });
 
 const translatePrayerNameToArabic = (name: string) => {
@@ -381,16 +573,24 @@ const translateCityNameToArabic = (name: string) => {
 </script>
 
 <template>
-  <main :class="['container', { compact: isCompactMode }]">
-    <div class="window-controls">
-      <!-- <button @click="toggleCompactMode" class="mode-toggle">
-        {{ isCompactMode ? "🔍" : "📱" }}
-      </button> -->
+  <main :class="['container', { compact: isMiniMode }]">
+    <div v-if="!isMiniMode" class="window-controls">
+      <button @click="toggleMiniMode" class="mode-toggle">
+        {{ isMiniMode ? "⬆️" : "⬇️" }}
+      </button>
+      <button
+        @click="closeApplication"
+        class="window-action close-btn"
+        aria-label="Close application"
+        title="Close application"
+      >
+        ✕
+      </button>
     </div>
 
     <div v-if="todayPrayerTimings" class="prayer-content">
-      <div class="header">
-        <h1 v-if="!isCompactMode">وقت الصلاة</h1>
+      <div v-if="!isMiniMode" class="header">
+        <h1>وقت الصلاة</h1>
         <div class="current-time">
           {{ formatTime(currentTime) }}
         </div>
@@ -407,10 +607,13 @@ const translateCityNameToArabic = (name: string) => {
       </div>
 
       <div v-if="activePrayer" class="next-prayer">
-        <h2 v-if="!isCompactMode">
+        <h2 v-if="!isMiniMode">
           {{ shouldShowNextPrayer ? "الصلاة القادمة" : "الصلاة السابقة" }}
         </h2>
-        <div class="prayer-info">
+        <div class="prayer-info" :class="{ 'mini-row': isMiniMode }">
+          <div v-if="isMiniMode" class="mini-grip" data-tauri-drag-region>
+            ⋮⋮
+          </div>
           <div
             class="prayer-name clickable"
             @click="onPrayerNameClick"
@@ -423,11 +626,30 @@ const translateCityNameToArabic = (name: string) => {
             {{ translatePrayerNameToArabic(activePrayer.name) }}
             <span class="toggle-hint">🔄</span>
           </div>
-          <div class="prayer-time">{{ activePrayer.timeString }}</div>
+          <div v-if="!isMiniMode" class="prayer-time">
+            {{ activePrayer.timeString }}
+          </div>
+          <button
+            v-if="isMiniMode"
+            class="mini-toggle"
+            @click="toggleMiniMode"
+            aria-label="Exit mini mode"
+          >
+            ⬆️
+          </button>
+          <button
+            v-if="isMiniMode"
+            class="mini-toggle close-btn"
+            @click="closeApplication"
+            aria-label="Close application"
+            title="Close application"
+          >
+            ✕
+          </button>
         </div>
 
         <div v-if="activeTimeDisplay" class="countdown">
-          <div class="countdown-title" v-if="!isCompactMode">
+          <div class="countdown-title" v-if="!isMiniMode">
             {{ shouldShowNextPrayer ? "الوقت المتبقي" : "الوقت المضت" }}
           </div>
           <div class="countdown-time">
@@ -435,31 +657,31 @@ const translateCityNameToArabic = (name: string) => {
               <span class="number">{{
                 activeTimeDisplay.hours.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">س</span>
+              <span class="label" v-if="!isMiniMode">س</span>
             </span>
             <span class="separator">:</span>
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.minutes.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">د</span>
+              <span class="label" v-if="!isMiniMode">د</span>
             </span>
             <span class="separator">:</span>
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.seconds.toString().padStart(2, "0")
               }}</span>
-              <span class="label" v-if="!isCompactMode">ث</span>
+              <span class="label" v-if="!isMiniMode">ث</span>
             </span>
           </div>
-          <div class="mode-indicator" v-if="!isCompactMode">
+          <div class="mode-indicator" v-if="!isMiniMode">
             <span :class="{ active: shouldShowNextPrayer }">⏭️ القادمة</span>
             <span :class="{ active: !shouldShowNextPrayer }">⏮️ السابقة</span>
           </div>
         </div>
       </div>
 
-      <div v-if="!isCompactMode" class="all-prayers">
+      <div v-if="!isMiniMode" class="all-prayers">
         <h3>وقت الصلاة لهذا اليوم</h3>
         <div class="prayers-grid">
           <div
@@ -510,16 +732,10 @@ body {
 
 .container.compact {
   min-height: auto;
-  max-width: 300px;
-  max-height: 200px;
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  border-radius: 15px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
   backdrop-filter: blur(10px);
   z-index: 1000;
-  padding: 15px;
+  padding: 8px;
 }
 
 .window-controls {
@@ -530,8 +746,56 @@ body {
   gap: 5px;
 }
 
+.prayer-info.mini-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mini-grip {
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  opacity: 0.5;
+  font-size: 0.8rem;
+  letter-spacing: -2px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.mini-grip:hover {
+  opacity: 0.9;
+}
+
+.mini-grip:active {
+  cursor: grabbing;
+}
+
+.mini-toggle {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 10px;
+  width: 34px;
+  height: 28px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-toggle:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .mode-toggle,
-.refresh-btn {
+.refresh-btn,
+.window-action {
   background: rgba(255, 255, 255, 0.2);
   border: none;
   border-radius: 50%;
@@ -548,9 +812,14 @@ body {
 }
 
 .mode-toggle:hover,
-.refresh-btn:hover {
+.refresh-btn:hover,
+.window-action:hover {
   background: rgba(255, 255, 255, 0.3);
   transform: scale(1.1);
+}
+
+.close-btn:hover {
+  background: rgba(220, 53, 69, 0.85);
 }
 
 .loading,
