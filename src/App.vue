@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { enable } from "@tauri-apps/plugin-autostart";
 import prayerTimesData from "./assets/prayer_times.json";
 import {
@@ -66,10 +68,21 @@ const currentTime = ref(new Date());
 const storedMiniMode = localStorage.getItem("isMiniMode") === "1";
 const isMiniMode = ref(storedMiniMode);
 const notificationShown = ref<string>("");
+const lastCheckTime = ref<Date>(new Date());
 const isManualToggle = ref(false);
 const showNextPrayer = ref(true);
 
 let timeInterval: number | null = null;
+let unlistenPrayerAlarm: null | (() => void) = null;
+let unlistenFocusChanged: null | (() => void) = null;
+
+const PRAYER_ALARM_NAMES = ["fajer", "dhuhr", "asr", "maghrib", "isha"];
+
+interface PrayerAlarmScheduleItem {
+  name: string;
+  time_ms: number;
+  time_string: string;
+}
 
 const prayerOrder = ["fajer", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
 
@@ -385,9 +398,65 @@ function togglePrayerMode() {
   showNextPrayer.value = !showNextPrayer.value;
 }
 
-// Show notification when prayer is close (5 minutes before)
+function buildPrayerSchedule(): PrayerAlarmScheduleItem[] {
+  if (!todayPrayerTimings.value) return [];
+
+  return PRAYER_ALARM_NAMES.map((name) => {
+    const timeString =
+      todayPrayerTimings.value![name as keyof PrayerTimings];
+    const time = prayerTimeToDate(timeString);
+    return {
+      name,
+      time_ms: time.getTime(),
+      time_string: timeString,
+    };
+  });
+}
+
+async function syncPrayerScheduleToRust() {
+  const schedule = buildPrayerSchedule();
+  if (schedule.length === 0) return;
+
+  try {
+    await invoke("sync_prayer_schedule", { schedule });
+  } catch (e) {
+    console.warn("[prayer-scheduler] sync failed:", e);
+  }
+}
+
+function handlePrayerAlarmEvent(prayer: string, timeString: string) {
+  const prayerKey = prayer;
+  if (notificationShown.value !== `${prayerKey}-now`) {
+    showNotification(`${prayer} prayer time!`, `Time: ${timeString}`);
+    notificationShown.value = `${prayerKey}-now`;
+  }
+}
+
+// Show notification when prayer is close (5 minutes before) or catch up missed "now"
 function checkNotification() {
-  if (!timeRemaining.value || !nextPrayer.value) return;
+  const now = currentTime.value;
+  const prev = lastCheckTime.value;
+
+  if (todayPrayerTimings.value) {
+    for (const name of PRAYER_ALARM_NAMES) {
+      const timeString =
+        todayPrayerTimings.value[name as keyof PrayerTimings];
+      const prayerTime = prayerTimeToDate(timeString);
+
+      if (prayerTime > prev && prayerTime <= now) {
+        const prayerKey = name;
+        if (notificationShown.value !== `${prayerKey}-now`) {
+          showNotification(`${name} prayer time!`, `Time: ${timeString}`);
+          notificationShown.value = `${prayerKey}-now`;
+        }
+      }
+    }
+  }
+
+  if (!timeRemaining.value || !nextPrayer.value) {
+    lastCheckTime.value = now;
+    return;
+  }
 
   const fiveMinutesMs = 5 * 60 * 1000;
   const oneMinuteMs = 1 * 60 * 1000;
@@ -416,15 +485,9 @@ function checkNotification() {
       );
       notificationShown.value = `${prayerKey}-1min`;
     }
-  } else if (timeRemaining.value.totalMs <= 0) {
-    if (notificationShown.value !== `${prayerKey}-now`) {
-      showNotification(
-        `${nextPrayer.value.name} prayer time!`,
-        `Time: ${nextPrayer.value.timeString}`
-      );
-      notificationShown.value = `${prayerKey}-now`;
-    }
   }
+
+  lastCheckTime.value = now;
 }
 
 // Show browser notification
@@ -480,10 +543,37 @@ function onPrayerNameClick() {
   togglePrayerMode();
 }
 
+function onVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    currentTime.value = new Date();
+    syncPrayerScheduleToRust();
+    checkNotification();
+  }
+}
+
 onMounted(async () => {
   await enable();
   await requestNotificationPermission();
   startTimeUpdates();
+  await syncPrayerScheduleToRust();
+
+  unlistenPrayerAlarm = await listen<{ prayer: string; time_string: string }>(
+    "prayer-alarm",
+    (event) => {
+      handlePrayerAlarmEvent(event.payload.prayer, event.payload.time_string);
+    }
+  );
+
+  document.addEventListener("visibilitychange", onVisibilityChange);
+
+  const win = getCurrentWindow();
+  unlistenFocusChanged = await win.onFocusChanged(({ payload: focused }) => {
+    if (focused) {
+      currentTime.value = new Date();
+      syncPrayerScheduleToRust();
+      checkNotification();
+    }
+  });
 
   if (platform() === "linux") {
     console.warn(
@@ -494,7 +584,6 @@ onMounted(async () => {
   // Apply persisted mini mode on startup.
   await applyMiniModeWindowBehavior(isMiniMode.value);
 
-  const win = getCurrentWindow();
   unlistenMoved = await win.onMoved(async () => {
     if (!isMiniMode.value || isSnapping) return;
     if (snapDebounceTimer) window.clearTimeout(snapDebounceTimer);
@@ -519,10 +608,21 @@ onUnmounted(() => {
     clearInterval(timeInterval);
   }
 
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+  if (unlistenPrayerAlarm) unlistenPrayerAlarm();
+  if (unlistenFocusChanged) unlistenFocusChanged();
   if (unlistenMoved) unlistenMoved();
   if (unlistenResized) unlistenResized();
   if (snapDebounceTimer) window.clearTimeout(snapDebounceTimer);
 });
+
+watch(
+  [todayPrayerTimings, selectedCity],
+  () => {
+    syncPrayerScheduleToRust();
+  },
+  { deep: true }
+);
 
 watch(isMiniMode, async (enabled) => {
   localStorage.setItem("isMiniMode", enabled ? "1" : "0");
@@ -653,6 +753,9 @@ const translateCityNameToArabic = (name: string) => {
             {{ shouldShowNextPrayer ? "الوقت المتبقي" : "الوقت المضت" }}
           </div>
           <div class="countdown-time">
+            <span v-if="isMiniMode" class="mini-direction">
+              {{ shouldShowNextPrayer ? "قادم" : "مضى" }}
+            </span>
             <span class="time-unit">
               <span class="number">{{
                 activeTimeDisplay.hours.toString().padStart(2, "0")
@@ -978,6 +1081,13 @@ body {
 .compact .countdown-time {
   font-size: 1.5rem;
   gap: 5px;
+}
+
+.mini-direction {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  margin-inline-end: 4px;
+  flex-shrink: 0;
 }
 
 .time-unit {

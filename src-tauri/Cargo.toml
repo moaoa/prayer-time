@@ -23,6 +23,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rodio = { version = "0.19", default-features = false, features = ["mp3", "wav"] }
+chrono = "0.4"
+tokio = { version = "1", features = ["time"] }
 tauri-plugin-autostart = "2.5.0"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"

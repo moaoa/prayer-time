@@ -12,6 +12,7 @@
     "autostart:allow-is-enabled",
     "os:default",
     "shell:default",
+    "allow-prayer-commands",
     {
       "identifier": "shell:allow-execute",
       "allow": [

@@ -1,0 +1,7 @@
+[[permission]]
+identifier = "allow-prayer-commands"
+description = "Allows prayer scheduler sync and sound playback commands."
+commands.allow = [
+  "sync_prayer_schedule",
+  "play_prayer_sound"
+]
