@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How Ubuntu Detects Audio Devices — Visual Explainer</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a3340;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --accent: #58a6ff;
+    --accent-2: #3fb950;
+    --accent-3: #d29922;
+    --accent-4: #f85149;
+    --code-bg: #0b0f14;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 8% -10%, #142033 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.hero {
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, #161b22 0%, #121a28 100%);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    margin-bottom: 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  header.hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(520px 220px at 90% 0%, rgba(88,166,255,0.12), transparent 70%);
+    pointer-events: none;
+  }
+  .badge {
+    display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid rgba(88,166,255,.4); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 16px; background: rgba(88,166,255,.08);
+  }
+  h1 { font-size: 2.1rem; margin: 0 0 8px; line-height: 1.2; }
+  h2 {
+    font-size: 1.4rem; margin: 48px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .lead { color: var(--muted); font-size: 1.05rem; max-width: 72ch; }
+  .muted { color: var(--muted); }
+
+  .card {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin: 16px 0;
+  }
+  .card.good { border-color: rgba(63,185,80,.45); }
+  .card.warn { border-color: rgba(210,153,34,.45); }
+  .card.bad { border-color: rgba(248,81,73,.45); }
+
+  .diagram {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    border-radius: var(--radius);
+    padding: 22px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+    font-size: 13.5px;
+  }
+  code { font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; }
+  p code, li code, td code, .chip {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px; font-size: 0.9em; color: #ffd9a8;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: .04em; }
+
+  .layers {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .layer {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--panel);
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  .layer .tag {
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .layer.kernel .tag { color: var(--accent-4); }
+  .layer.alsa .tag { color: var(--accent-3); }
+  .layer.pw .tag { color: var(--accent); }
+  .layer.app .tag { color: var(--accent-2); }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .compare { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 1fr; }
+  }
+
+  .device-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .device-list li {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 13px;
+  }
+  .device-list li:last-child { border-bottom: none; }
+  .device-list .keep { color: #7ee787; }
+  .device-list .drop { color: #f85149; opacity: 0.75; text-decoration: line-through; }
+
+  .toc a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .toc a:hover { text-decoration: underline; }
+  .toc ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
+
+  .step {
+    display: flex;
+    gap: 14px;
+    margin: 12px 0;
+    align-items: flex-start;
+  }
+  .step .n {
+    flex: 0 0 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(88,166,255,.15);
+    border: 1px solid rgba(88,166,255,.4);
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="badge">Ubuntu 24.04 · PipeWire · Prayer Times app</div>
+  <h1>How Ubuntu detects audio devices</h1>
+  <p class="lead">
+    Why Settings used to show <code>hw:CARD=sofhdadsp</code> and friends — and how the app now
+    finds the <em>real</em> speakers (laptop + Bluetooth) via PipeWire.
+  </p>
+</header>
+
+<nav class="card toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#stack">1. The Ubuntu audio stack (layers)</a></li>
+    <li><a href="#names">2. Why one speaker becomes many names</a></li>
+    <li><a href="#detect">3. How apps discover devices</a></li>
+    <li><a href="#app">4. What this app does</a></li>
+    <li><a href="#example">5. Your machine as an example</a></li>
+  </ul>
+</nav>
+
+<h2 id="stack">1. The Ubuntu audio stack</h2>
+<p class="muted">
+  Sound does not go straight from the app to the speaker. On modern Ubuntu (22.04+ / 24.04),
+  <strong>PipeWire</strong> sits in the middle and owns the friendly device list you see in GNOME Settings.
+</p>
+
+<div class="layers">
+  <div class="layer app">
+    <div class="tag">Apps</div>
+    <div>
+      Prayer Times, Chrome, Spotify… They ask “what can I play on?” through libraries
+      (cpal/rodio, PulseAudio API, or PipeWire tools like <code>pw-dump</code> / <code>pw-play</code>).
+    </div>
+  </div>
+  <div class="layer pw">
+    <div class="tag">PipeWire</div>
+    <div>
+      Session manager (WirePlumber) builds <strong>sinks</strong>: one real output target each —
+      “Speaker + Headphones”, “soundcore R60i NC”, HDMI ports, etc.
+      PulseAudio apps talk to <code>pipewire-pulse</code> (compatibility layer).
+    </div>
+  </div>
+  <div class="layer alsa">
+    <div class="tag">ALSA</div>
+    <div>
+      Low-level Linux audio API. Exposes the PCI sound chip as many <em>device strings</em>
+      (<code>hw:</code>, <code>plughw:</code>, <code>dmix:</code>…) — different <em>ways in</em>, not different speakers.
+    </div>
+  </div>
+  <div class="layer kernel">
+    <div class="tag">Kernel / HW</div>
+    <div>
+      Driver for the chip (e.g. Intel <code>sof-hda-dsp</code> / <code>sofhdadsp</code>) plus
+      Bluetooth (<code>bluez</code>). Physical routes: built-in speakers, 3.5 mm jack, HDMI, BT headset.
+    </div>
+  </div>
+</div>
+
+<div class="diagram">
+  <pre class="mermaid">
+flowchart TB
+  subgraph apps [Applications]
+    PrayerApp[Prayer Times]
+    Browser[Chrome]
+  end
+  subgraph session [User session]
+    PW[PipeWire + WirePlumber]
+    PulseCompat[pipewire-pulse]
+  end
+  subgraph kernel [Kernel]
+    ALSA[ALSA sofhdadsp]
+    BlueZ[BlueZ Bluetooth]
+  end
+  Speakers[Laptop speakers / wired jack]
+  BT[soundcore headphones]
+  HDMI[HDMI / DisplayPort]
+
+  PrayerApp -->|pw-dump / pw-play| PW
+  Browser --> PulseCompat
+  PulseCompat --> PW
+  PW --> ALSA
+  PW --> BlueZ
+  ALSA --> Speakers
+  ALSA --> HDMI
+  BlueZ --> BT
+  </pre>
+</div>
+
+<h2 id="names">2. Why one chip becomes many names</h2>
+<p>
+  ALSA lists <em>plugin paths</em> for the same card. PipeWire collapses those into a few
+  <em>logical sinks</em> with human names.
+</p>
+
+<div class="compare">
+  <div class="card bad">
+    <h3 style="margin-top:0">ALSA (raw) — confusing</h3>
+    <p class="muted" style="margin-top:0">What cpal often returns on Linux</p>
+    <ul class="device-list">
+      <li class="drop">pipewire</li>
+      <li class="drop">default</li>
+      <li class="drop">hw:CARD=sofhdadsp,DEV=0</li>
+      <li class="drop">hw:CARD=sofhdadsp,DEV=3</li>
+      <li class="drop">plughw:… / dmix:… / sysdefault:…</li>
+    </ul>
+    <p class="muted" style="margin-bottom:0">Same Intel card, many access aliases + HDMI device numbers.</p>
+  </div>
+  <div class="card good">
+    <h3 style="margin-top:0">PipeWire sinks — real</h3>
+    <p class="muted" style="margin-top:0">What <code>wpctl status</code> / GNOME shows</p>
+    <ul class="device-list">
+      <li class="keep">Speaker + Headphones</li>
+      <li class="keep">soundcore R60i NC</li>
+      <li class="drop">HDMI / DisplayPort 1..3 (usually unused)</li>
+    </ul>
+    <p class="muted" style="margin-bottom:0">Laptop speakers and the wired jack share one sink; BT is separate.</p>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Name pattern</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>hw:CARD=…,DEV=n</code></td>
+      <td>Raw hardware PCM #n (0 = analog, 3–5 often HDMI, 31 = deep buffer)</td>
+    </tr>
+    <tr>
+      <td><code>plughw:</code></td>
+      <td>Same as <code>hw:</code> but ALSA converts sample rate/format for you</td>
+    </tr>
+    <tr>
+      <td><code>dmix:</code></td>
+      <td>Software mixer so multiple apps can share the card</td>
+    </tr>
+    <tr>
+      <td><code>default</code> / <code>pipewire</code></td>
+      <td>Follow the system default route (not a second speaker)</td>
+    </tr>
+    <tr>
+      <td><code>node.description</code> (PipeWire)</td>
+      <td>Friendly label used in Settings UI</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="detect">3. How apps discover devices</h2>
+
+<div class="step">
+  <div class="n">1</div>
+  <div>
+    <strong>Kernel + drivers</strong> register the card and Bluetooth adapter.
+    Check with <code>aplay -l</code> (ALSA) or <code>wpctl status</code> (PipeWire).
+  </div>
+</div>
+<div class="step">
+  <div class="n">2</div>
+  <div>
+    <strong>PipeWire / WirePlumber</strong> create one Audio/Sink node per usable route,
+    with properties <code>media.class</code>, <code>node.name</code>, <code>node.description</code>.
+  </div>
+</div>
+<div class="step">
+  <div class="n">3</div>
+  <div>
+    <strong>Apps query</strong> either:
+    <ul>
+      <li>PipeWire JSON dump → <code>/usr/bin/pw-dump</code> (what this app prefers), or</li>
+      <li>Pulse / GNOME APIs, or</li>
+      <li>ALSA via cpal → lots of aliases (what caused the old Settings list).</li>
+    </ul>
+  </div>
+</div>
+<div class="step">
+  <div class="n">4</div>
+  <div>
+    <strong>Filter</strong> monitors, null/dummy, HDMI (optional), and ALSA alias prefixes
+    so the UI only shows devices a human would pick.
+  </div>
+</div>
+
+<div class="diagram">
+  <pre class="mermaid">
+flowchart LR
+  A[App asks for outputs] --> B{Which API?}
+  B -->|pw-dump| C[PipeWire graph JSON]
+  B -->|cpal default host| D[ALSA device names]
+  C --> E[Keep media.class = Audio/Sink]
+  E --> F[Drop HDMI / monitors]
+  F --> G[Show friendly descriptions]
+  D --> H[Many hw/plughw/dmix rows]
+  H --> I[Looks like 17 speakers]
+  G --> J[Laptop + Bluetooth]
+  </pre>
+</div>
+
+<pre><code># Useful commands on Ubuntu
+wpctl status          # live sinks/sources (* = default)
+pw-dump | …           # full graph as JSON
+aplay -l              # ALSA hardware cards only
+</code></pre>
+
+<h2 id="app">4. What the Prayer Times app does</h2>
+<p class="muted">
+  Implemented in <code>src-tauri/src/audio_output.rs</code>. Listing and multi-speaker playback
+  both prefer PipeWire.
+</p>
+
+<div class="diagram">
+  <pre class="mermaid">
+flowchart TD
+  Settings[Settings: list_audio_output_devices]
+  List[list_output_device_names]
+  Dump["/usr/bin/pw-dump"]
+  Parse[Parse JSON · Audio/Sink only]
+  Filter[Drop HDMI + virtual + ALSA aliases]
+  UI[UI: friendly names]
+  Err[Clear error if none found]
+  CPAL[Filtered cpal fallback]
+  Play[Multi-speaker: pw-play --target per sink]
+
+  Settings --> List
+  List --> Dump
+  Dump --> Parse --> Filter
+  Filter -->|sinks found| UI
+  Filter -->|empty / pw-dump failed| CPAL
+  CPAL -->|usable names| UI
+  CPAL -->|still empty| Err
+  Filter --> Play
+  </pre>
+</div>
+
+<div class="card good">
+  <h3 style="margin-top:0">Key rules in code</h3>
+  <ul>
+    <li>Call <code>/usr/bin/pw-dump</code> and <code>/usr/bin/pw-play</code> with <strong>absolute paths</strong> (GUI / autostart often has a thin <code>PATH</code>).</li>
+    <li>Keep sinks where <code>media.class == "Audio/Sink"</code>.</li>
+    <li>Show <code>node.description</code> (e.g. <em>soundcore R60i NC</em>), play to <code>node.name</code>.</li>
+    <li>Reject HDMI/DisplayPort and names starting with <code>hw:</code>, <code>plughw:</code>, <code>dmix:</code>, etc.</li>
+    <li>Never dump the raw ALSA alias list into Settings.</li>
+  </ul>
+</div>
+
+<div class="card warn">
+  <h3 style="margin-top:0">Multi-speaker note</h3>
+  <p style="margin-bottom:0">
+    “Play on all outputs” means <em>all filtered PipeWire sinks</em>, not every ALSA alias.
+    On your laptop that is typically built-in Speaker+Headphones <strong>and</strong> Bluetooth —
+    two streams, not seventeen.
+  </p>
+</div>
+
+<h2 id="example">5. Your machine as an example</h2>
+<table>
+  <thead>
+    <tr><th>What you have</th><th>How the OS represents it</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Laptop speakers</td>
+      <td>PipeWire sink <em>Raptor Lake… Speaker + Headphones</em> (shared with 3.5 mm jack)</td>
+    </tr>
+    <tr>
+      <td>soundcore R60i NC</td>
+      <td>PipeWire Bluetooth sink <code>bluez_output.…</code></td>
+    </tr>
+    <tr>
+      <td>HDMI ports (unused TV/monitor audio)</td>
+      <td>Separate sinks — app filters these out for the Settings list</td>
+    </tr>
+    <tr>
+      <td>One sof-hda-dsp sound card</td>
+      <td>ALSA shows many <code>hw:</code>/<code>dmix:</code> aliases for the same card</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card">
+  <h3 style="margin-top:0">Takeaway</h3>
+  <p style="margin-bottom:0">
+    Ubuntu <em>detects</em> hardware at the ALSA / Bluetooth layer, then PipeWire
+    <em>presents</em> it as a small set of sinks. Apps that read ALSA see aliases;
+    apps that read PipeWire see the real speakers. This app switched listing (and
+    multi-speaker play) to PipeWire so Settings matches what you actually own.
+  </p>
+</div>
+
+</div>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    securityLevel: "loose",
+    flowchart: { curve: "basis", htmlLabels: true }
+  });
+</script>
+</body>
+</html>

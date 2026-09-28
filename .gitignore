@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated audio scratch output (auditioned before approval)
+sounds_generated/
+
+# Piper TTS venv and downloaded voice models
+.venv-piper/
+models/piper/

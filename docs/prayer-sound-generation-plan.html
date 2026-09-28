@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prayer Sound Generation Plan</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a3340;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --accent: #3fb950;
+    --accent-2: #58a6ff;
+    --accent-3: #d29922;
+    --accent-4: #bc8cff;
+    --code-bg: #0b0f14;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 80% -10%, #18222e 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.hero {
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, #161b22 0%, #11161d 100%);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    margin-bottom: 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  header.hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(500px 200px at 90% 0%, rgba(63,185,80,0.12), transparent 70%);
+    pointer-events: none;
+  }
+  .badge {
+    display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid rgba(63,185,80,.4); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 16px; background: rgba(63,185,80,.08);
+  }
+  h1 { font-size: 2.1rem; margin: 0 0 8px; line-height: 1.2; }
+  h2 {
+    font-size: 1.4rem; margin: 48px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; color: var(--text); }
+  p { color: var(--text); }
+  .lead { color: var(--muted); font-size: 1.05rem; max-width: 70ch; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent-2); }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 760px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+
+  .card {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+  }
+  .card.accent { border-color: rgba(88,166,255,.35); }
+  .card h3 { margin-top: 0; }
+  .card .tag {
+    display: inline-block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    border-radius: 6px; padding: 3px 8px; margin-bottom: 10px; font-weight: 600;
+  }
+  .tag.a { color: var(--accent); background: rgba(63,185,80,.12); }
+  .tag.b { color: var(--accent-2); background: rgba(88,166,255,.12); }
+  .tag.c { color: var(--accent-3); background: rgba(210,153,34,.12); }
+  .tag.d { color: var(--accent-4); background: rgba(188,140,255,.12); }
+
+  .diagram {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    border-radius: var(--radius);
+    padding: 22px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+    font-size: 13.5px;
+  }
+  code { font-family: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, monospace; }
+  pre code { color: #c9d1d9; }
+  p code, li code, td code {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px; font-size: 0.9em; color: #ffd9a8;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: .04em; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  ul.clean { list-style: none; padding-left: 0; }
+  ul.clean li { padding-left: 26px; position: relative; margin: 8px 0; }
+  ul.clean li::before { content: "▸"; position: absolute; left: 4px; color: var(--accent); }
+
+  .callout {
+    border-left: 3px solid var(--accent-3);
+    background: rgba(210,153,34,.07);
+    border-radius: 8px; padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.info { border-left-color: var(--accent-2); background: rgba(88,166,255,.07); }
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
+    color: #08130b; font-weight: 700; font-size: 14px; margin-right: 8px;
+  }
+  footer { margin-top: 64px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+  .kbd { font-size: .8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">Plan · Audio Generation</span>
+    <h1>Procedural Prayer Sounds with Python</h1>
+    <p class="lead">
+      A plan to synthesize adhan-inspired alert sounds for all five prayers
+      (<code>fajer</code>, <code>dhuhr</code>, <code>asr</code>, <code>maghrib</code>, <code>isha</code>)
+      entirely in Python — producing several distinct variations to audition, so you can approve
+      the one you like before it ships into the app.
+    </p>
+  </header>
+
+  <h2>1. Goal</h2>
+  <p>
+    Replace / supplement the current placeholder files in <code>src-tauri/sounds/</code> with
+    cleanly synthesized alert tones generated by a Python script. The script produces
+    <strong>multiple complete sound packs (variations)</strong>. You listen, pick one,
+    and we copy that pack into the app's sound folder.
+  </p>
+  <div class="callout">
+    <strong>Honest scope note:</strong> Pure Python DSP cannot reproduce a real human <em>adhan</em>
+    (that requires a vocal recording or singing-voice synthesis). These variations are
+    <em>adhan-inspired</em> tonal / melodic chimes — calm, recognizable call-to-prayer alerts.
+    If you actually want a recorded muezzin voice, that's a different (non-generative) path and
+    I'll flag it instead.
+  </div>
+
+  <h2>2. How the app consumes sounds today</h2>
+  <p>
+    The Rust backend resolves one file per prayer and plays it through <code>rodio</code>.
+    Our generated files just need to land in the right folder with the right names.
+  </p>
+  <div class="diagram">
+    <div class="mermaid">
+flowchart LR
+    A["Scheduler tick<br/>(prayer_scheduler.rs)"] --> B{"prayer time<br/>reached?"}
+    B -- yes --> C["resolve_sound_path(prayer)"]
+    C --> D["src-tauri/sounds/{prayer}.mp3<br/>(mp3 · wav · ogg · m4a)"]
+    D --> E["play_sound() via rodio"]
+    E --> F["default output<br/>or all devices<br/>(multi-speaker)"]
+    B -- no --> A
+    </div>
+  </div>
+  <ul class="clean">
+    <li>Accepted extensions: <code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.m4a</code> — we'll ship <code>.mp3</code> to match the existing convention.</li>
+    <li>Required names: <code>fajer</code>, <code>dhuhr</code>, <code>asr</code>, <code>maghrib</code>, <code>isha</code> (sunrise has no alarm).</li>
+    <li>"Test adhan" button in Settings already plays <code>dhuhr</code> — handy for auditioning in-app.</li>
+  </ul>
+
+  <h2>3. Tech stack</h2>
+  <div class="grid cols-3">
+    <div class="card">
+      <h3>Synthesis</h3>
+      <p class="muted"><code>numpy</code> for oscillators, envelopes, FM, additive partials, noise &amp; filtering.</p>
+    </div>
+    <div class="card">
+      <h3>File output</h3>
+      <p class="muted"><code>soundfile</code> (or <code>scipy.io.wavfile</code>) writes 44.1 kHz WAV.</p>
+    </div>
+    <div class="card">
+      <h3>MP3 encode</h3>
+      <p class="muted"><code>ffmpeg</code> via <code>subprocess</code> (or <code>pydub</code>) converts WAV → MP3.</p>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:14px">
+    Dependencies kept minimal &amp; offline: <code>pip install numpy soundfile</code> + system <code>ffmpeg</code>.
+    No external APIs, no audio assets downloaded.
+  </p>
+
+  <h2>4. Generation pipeline</h2>
+  <p>Each prayer sound is built from the same parametric pipeline; the <em>parameters</em> are what differ between variations and between prayers.</p>
+  <div class="diagram">
+    <div class="mermaid">
+flowchart TD
+    P["Variation preset<br/>+ per-prayer params<br/>(root note, length, brightness)"] --> OSC["Oscillators<br/>sine / FM / additive partials"]
+    OSC --> MEL["Melodic motif<br/>(maqam-scale note sequence)"]
+    MEL --> ENV["Per-note ADSR envelope"]
+    ENV --> FX["Effects<br/>vibrato · detune · reverb tail · soft saturation"]
+    FX --> MIX["Mix + stereo widen"]
+    MIX --> NORM["Normalize / peak-limit (-1 dBFS)<br/>fade in/out"]
+    NORM --> WAV["WAV 44.1kHz"]
+    WAV --> MP3["ffmpeg → MP3 (192 kbps)"]
+    MP3 --> OUT["sounds_generated/{variation}/{prayer}.mp3"]
+    </div>
+  </div>
+
+  <h2>5. The variations</h2>
+  <p>I'll generate <strong>four</strong> complete packs (each pack = all 5 prayer sounds in a consistent style). You can approve one pack, or mix-and-match per prayer.</p>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <span class="tag a">Variation A</span>
+      <h3>Gentle Chime (Bells)</h3>
+      <p>Soft glockenspiel/bell tones via additive synthesis with slightly inharmonic partials and a long, shimmering decay. Calm and modern.</p>
+      <p class="muted">Feel: serene, unobtrusive · Best for: a soft household alert.</p>
+    </div>
+    <div class="card">
+      <span class="tag b">Variation B</span>
+      <h3>Maqam Melody (Reed / Ney)</h3>
+      <p>A short melodic phrase in a traditional adhan scale (Hijaz / Bayati), using filtered FM to emulate a ney reed flute, with gentle vibrato. The most "call-to-prayer" in character.</p>
+      <p class="muted">Feel: traditional, expressive · Best for: an authentic mood.</p>
+    </div>
+    <div class="card">
+      <span class="tag c">Variation C</span>
+      <h3>Warm Gong / Singing Bowl</h3>
+      <p>A low, warm gong strike with rich overtones and a meditative ring-out. Deep and grounding.</p>
+      <p class="muted">Feel: meditative, weighty · Best for: night prayers (isha, fajer).</p>
+    </div>
+    <div class="card">
+      <span class="tag d">Variation D</span>
+      <h3>Modern Notification (Marimba)</h3>
+      <p>Clean plucked / marimba arpeggio — a pleasant, concise desktop-notification style ping.</p>
+      <p class="muted">Feel: crisp, lightweight · Best for: minimal distraction.</p>
+    </div>
+  </div>
+
+  <h2>6. Per-prayer character</h2>
+  <p>Within each variation, every prayer gets a subtly distinct identity (root pitch, length, brightness, loudness) tuned to the time of day.</p>
+  <table>
+    <thead>
+      <tr><th>Prayer</th><th>Mood</th><th>Root note</th><th>Length</th><th>Loudness</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>fajer</td><td>Gentle wake</td><td>low (A3)</td><td>~8s</td><td>soft</td></tr>
+      <tr><td>dhuhr</td><td>Bright midday</td><td>mid (D4)</td><td>~6s</td><td>medium</td></tr>
+      <tr><td>asr</td><td>Warm afternoon</td><td>mid (C4)</td><td>~6s</td><td>medium</td></tr>
+      <tr><td>maghrib</td><td>Warm dusk</td><td>low-mid (A3)</td><td>~7s</td><td>medium</td></tr>
+      <tr><td>isha</td><td>Calm night</td><td>low (G3)</td><td>~8s</td><td>soft</td></tr>
+    </tbody>
+  </table>
+
+  <h2>7. Output layout &amp; audition workflow</h2>
+  <p>Nothing overwrites your current sounds until you approve. Generated packs land in a scratch folder.</p>
+  <pre><code>prayer-time/
+├─ scripts/
+│  └─ generate_sounds.py        # the generator
+├─ sounds_generated/            # scratch output (git-ignored)
+│  ├─ A_chime/      fajer.mp3 dhuhr.mp3 asr.mp3 maghrib.mp3 isha.mp3
+│  ├─ B_maqam/      ...
+│  ├─ C_gong/       ...
+│  └─ D_marimba/    ...
+└─ src-tauri/sounds/            # ← approved pack copied here</code></pre>
+
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant You
+    participant Script as generate_sounds.py
+    participant Out as sounds_generated/
+    participant App as src-tauri/sounds/
+    Script->>Out: render A, B, C, D packs (mp3)
+    You->>Out: listen to each variation
+    You-->>Script: "I like B (or B-fajer + A-dhuhr ...)"
+    Script->>App: copy approved pack → {prayer}.mp3
+    You->>App: Settings → "Test adhan" to verify in-app
+    </div>
+  </div>
+
+  <h2>8. Script skeleton (preview)</h2>
+  <p>For reference, the generator will be structured roughly like this:</p>
+  <pre><code>VARIATIONS = ["A_chime", "B_maqam", "C_gong", "D_marimba"]
+PRAYERS = {
+    "fajer":   dict(root=220.0, dur=8, gain=0.6),
+    "dhuhr":   dict(root=293.7, dur=6, gain=0.85),
+    "asr":     dict(root=261.6, dur=6, gain=0.85),
+    "maghrib": dict(root=220.0, dur=7, gain=0.8),
+    "isha":    dict(root=196.0, dur=8, gain=0.6),
+}
+
+def render(variation, prayer, params) -> np.ndarray: ...   # build samples
+def to_mp3(samples, path): ...                              # wav -> ffmpeg -> mp3
+
+for v in VARIATIONS:
+    for prayer, params in PRAYERS.items():
+        audio = render(v, prayer, params)
+        to_mp3(audio, f"sounds_generated/{v}/{prayer}.mp3")</code></pre>
+
+  <h2>9. Steps to execute (after you approve this plan)</h2>
+  <div class="card accent">
+    <p><span class="step-num">1</span> Add <code>scripts/generate_sounds.py</code> and ignore <code>sounds_generated/</code> in git.</p>
+    <p><span class="step-num">2</span> Implement the 4 variation engines + per-prayer parameters.</p>
+    <p><span class="step-num">3</span> Run it to render all 4 packs (20 files) into <code>sounds_generated/</code>.</p>
+    <p><span class="step-num">4</span> You audition and tell me which pack (or mix) you want.</p>
+    <p><span class="step-num">5</span> Copy approved files into <code>src-tauri/sounds/</code> and verify with the in-app "Test adhan" button.</p>
+  </div>
+
+  <h2>10. Open questions for you</h2>
+  <ul class="clean">
+    <li>Are synthesized <em>chimes/melodies</em> acceptable, or do you specifically want a recorded muezzin voice?</li>
+    <li>Keep all four variations, or want me to focus on a subset?</li>
+    <li>Ship as <code>.mp3</code> (matches current) — OK, or prefer <code>.wav</code>?</li>
+    <li>Is <code>ffmpeg</code> available on this machine, or should the script fall back to writing <code>.wav</code> only?</li>
+  </ul>
+
+  <footer>
+    Prayer Time · sound generation plan — edit the variation list in section 5 and I'll proceed.
+  </footer>
+
+</div>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1c232c",
+      primaryColor: "#1c232c",
+      primaryBorderColor: "#3fb950",
+      primaryTextColor: "#e6edf3",
+      lineColor: "#58a6ff",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 },
+    sequence: { useMaxWidth: true }
+  });
+</script>
+</body>
+</html>

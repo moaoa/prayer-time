@@ -3,5 +3,7 @@ identifier = "allow-prayer-commands"
 description = "Allows prayer scheduler sync and sound playback commands."
 commands.allow = [
   "sync_prayer_schedule",
-  "play_prayer_sound"
+  "play_prayer_sound",
+  "set_multi_speaker_enabled",
+  "list_audio_output_devices"
 ]

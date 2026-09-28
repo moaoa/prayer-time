@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Double Sound Playback — Bug Analysis &amp; Fix Plan</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a3340;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --accent: #f85149;
+    --accent-2: #58a6ff;
+    --accent-3: #3fb950;
+    --accent-4: #d29922;
+    --code-bg: #0b0f14;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 10% -10%, #2a1820 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.hero {
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, #161b22 0%, #1a1218 100%);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    margin-bottom: 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  header.hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(500px 200px at 90% 0%, rgba(248,81,73,0.10), transparent 70%);
+    pointer-events: none;
+  }
+  .badge {
+    display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid rgba(248,81,73,.4); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 16px; background: rgba(248,81,73,.08);
+  }
+  h1 { font-size: 2.1rem; margin: 0 0 8px; line-height: 1.2; }
+  h2 {
+    font-size: 1.4rem; margin: 48px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; }
+  p { color: var(--text); }
+  .lead { color: var(--muted); font-size: 1.05rem; max-width: 72ch; }
+  .muted { color: var(--muted); }
+
+  .card {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin: 16px 0;
+  }
+  .card.critical { border-color: rgba(248,81,73,.45); }
+  .card.fix { border-color: rgba(63,185,80,.45); }
+
+  .diagram {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    border-radius: var(--radius);
+    padding: 22px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+    font-size: 13.5px;
+  }
+  code { font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; }
+  p code, li code, td code {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px; font-size: 0.9em; color: #ffd9a8;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: .04em; }
+
+  ul.clean { list-style: none; padding-left: 0; }
+  ul.clean li { padding-left: 26px; position: relative; margin: 8px 0; }
+  ul.clean li::before { content: "▸"; position: absolute; left: 4px; color: var(--accent-2); }
+
+  .callout {
+    border-left: 3px solid var(--accent-4);
+    background: rgba(210,153,34,.07);
+    border-radius: 8px; padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.ok { border-left-color: var(--accent-3); background: rgba(63,185,80,.07); }
+
+  .tag {
+    display: inline-block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    border-radius: 6px; padding: 3px 8px; margin-right: 6px; font-weight: 600;
+  }
+  .tag.high { color: var(--accent); background: rgba(248,81,73,.12); }
+  .tag.med { color: var(--accent-4); background: rgba(210,153,34,.12); }
+  .tag.low { color: var(--muted); background: rgba(154,167,180,.12); }
+
+  footer { margin-top: 64px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">Bug report · Audio</span>
+    <h1>Prayer sound plays twice</h1>
+    <p class="lead">
+      Analysis of why adhan audio is heard twice when using <strong>Test adhan</strong> or when a
+      scheduled prayer alarm fires, plus a concrete fix plan for the Rust audio layer.
+    </p>
+  </header>
+
+  <h2>1. Symptom</h2>
+  <p>
+    When the user clicks <em>Test adhan</em> (Settings or Home) or when a prayer time is reached,
+    the spoken MP3 appears to play <strong>two times</strong> — either as an obvious echo/overlap,
+    or as two nearly identical copies through the same speakers.
+  </p>
+
+  <h2>2. How playback works today</h2>
+  <p>Audio is played only in the Rust backend via <code>rodio</code>. The Vue frontend never plays MP3 files itself.</p>
+
+  <div class="diagram">
+    <div class="mermaid">
+flowchart TD
+    UI["Vue UI<br/>Test adhan button"] -->|"invoke play_prayer_sound"| Cmd["play_prayer_sound()"]
+    Sched["Scheduler loop<br/>every 1s"] --> Trigger["trigger_alarm()"]
+    Trigger --> PlayThread["thread::spawn"]
+    Cmd --> PlayThread
+    PlayThread --> Resolve["resolve_sound_path()"]
+    Resolve --> PS["play_sound(path, multi_speaker)"]
+    PS --> Off["multi_speaker = false<br/>play_sound_default()"]
+    PS --> On["multi_speaker = true<br/>play on ALL output devices"]
+    Trigger --> Emit["emit prayer-alarm event"]
+    Emit --> Notif["HomeView: notification only<br/>(no audio)"]
+    </div>
+  </div>
+
+  <p class="muted">Relevant files:</p>
+  <ul class="clean">
+    <li><code>src-tauri/src/audio_output.rs</code> — <code>play_sound()</code></li>
+    <li><code>src-tauri/src/prayer_scheduler.rs</code> — <code>trigger_alarm()</code>, <code>play_prayer_sound()</code></li>
+    <li><code>src/composables/useMultiSpeaker.ts</code> — toggles multi-speaker via Rust state</li>
+    <li><code>src/views/SettingsView.vue</code> — already warns about Linux virtual devices</li>
+  </ul>
+
+  <h2>3. Root cause (primary): multi-speaker plays on virtual monitor devices</h2>
+
+  <div class="card critical">
+    <span class="tag high">Most likely</span>
+    <h3>Linux exposes duplicate output endpoints</h3>
+    <p>
+      When <strong>multi-speaker mode</strong> is enabled, <code>play_sound()</code> enumerates
+      <em>every</em> CPAL output device and spawns one playback thread per device:
+    </p>
+<pre><code>// audio_output.rs — when multi_speaker && devices.len() >= 2
+for device in devices {
+    thread::spawn(|| play_sound_on_device(path, &device));
+}</code></pre>
+    <p>
+      On Ubuntu with PipeWire/PulseAudio, the device list often includes both:
+    </p>
+    <ul class="clean">
+      <li><code>Built-in Audio Analog Stereo</code> — the real speakers</li>
+      <li><code>Monitor of Built-in Audio Analog Stereo</code> — a <em>loopback</em> of what is already playing on that sink</li>
+    </ul>
+    <p>
+      Playing the same MP3 on both routes the audio to the same physical speakers <strong>twice</strong>.
+      The user hears a doubled/echoed adhan. With 3+ virtual sinks, it can sound even worse.
+    </p>
+  </div>
+
+  <div class="diagram">
+    <div class="mermaid">
+flowchart LR
+    MP3["dhuhr.mp3"] --> Thread1["Thread: Built-in Analog"]
+    MP3 --> Thread2["Thread: Monitor of Built-in"]
+    Thread1 --> Speakers["Physical speakers"]
+    Thread2 --> Loopback["Loopback re-enters mix"]
+    Loopback --> Speakers
+    </div>
+  </div>
+
+  <p>
+    This matches the warning already present in Settings (Arabic UI): virtual outputs like
+    <em>Monitor of …</em> may appear on Linux when multi-speaker is on.
+  </p>
+
+  <h2>4. Secondary causes to rule out</h2>
+
+  <table>
+    <thead>
+      <tr><th>Cause</th><th>Likelihood</th><th>Why it is / isn't the bug</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Frontend plays audio twice</td>
+        <td><span class="tag low">Unlikely</span></td>
+        <td><code>handlePrayerAlarmEvent</code> only sends a desktop notification. No <code>Audio</code> element or second <code>invoke</code> on alarm.</td>
+      </tr>
+      <tr>
+        <td>Scheduler fires alarm twice</td>
+        <td><span class="tag low">Unlikely</span></td>
+        <td><code>fired: HashSet</code> deduplicates per prayer per day. Mutex guards the check.</td>
+      </tr>
+      <tr>
+        <td>Two app instances running</td>
+        <td><span class="tag med">Possible</span></td>
+        <td>Autostart (<code>enable()</code> on mount) + a manually launched copy = two schedulers, two sounds at alarm time. Does not explain double play on a single Test click unless both instances receive events (they don't for invoke).</td>
+      </tr>
+      <tr>
+        <td>Multi-speaker OFF but still doubled</td>
+        <td><span class="tag med">Check setting</span></td>
+        <td>With multi-speaker off, only <code>play_sound_default()</code> runs once. If doubling persists, verify <code>localStorage multiSpeakerEnabled</code> and list devices in Settings.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>5. How to confirm before fixing</h2>
+
+  <div class="card">
+    <ol>
+      <li>Open <strong>Settings → Available audio outputs</strong> and note device names.</li>
+      <li>Check whether <strong>multi-speaker</strong> toggle is ON.</li>
+      <li>If you see any name containing <code>Monitor</code>, <code>Loopback</code>, or <code>Null</code>, that confirms the primary cause.</li>
+      <li>Turn multi-speaker OFF and click Test adhan again.
+        <ul class="clean">
+          <li>If doubling stops → root cause confirmed.</li>
+          <li>If doubling continues → check for two running app processes (<code>pgrep -a libya-prayer</code>).</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <h2>6. Recommended fix</h2>
+
+  <div class="card fix">
+    <h3>Fix A — Filter virtual/loopback devices (required)</h3>
+    <p>
+      In <code>audio_output.rs</code>, skip non-physical sinks when collecting devices for multi-speaker playback.
+    </p>
+<pre><code>fn is_physical_output(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    !n.contains("monitor")
+        && !n.contains("loopback")
+        && !n.contains("null")
+        && !n.contains("dummy")
+}</code></pre>
+    <p>Apply in <code>collect_output_devices()</code> and optionally in <code>list_output_device_names()</code> so the Settings list matches what will actually be used.</p>
+    <p>After filtering, if zero devices remain → fall back to <code>play_sound_default()</code>.</p>
+  </div>
+
+  <div class="card fix">
+    <h3>Fix B — Prefer default device when only one physical sink (nice-to-have)</h3>
+    <p>
+      If filtered list has exactly one physical device, use <code>play_sound_on_device</code> once.
+      If multiple physical devices (e.g. speakers + HDMI), keep parallel playback — that is the intended multi-room behavior.
+    </p>
+  </div>
+
+  <div class="card fix">
+    <h3>Fix C — Single-instance guard (optional, separate issue)</h3>
+    <p>
+      Prevent two app processes (autostart + manual launch) from both playing scheduled alarms.
+      Tauri supports a single-instance plugin or a file lock on startup.
+    </p>
+  </div>
+
+  <h2>7. Implementation steps</h2>
+
+  <div class="diagram">
+    <div class="mermaid">
+flowchart TD
+    A["Add is_physical_output() helper"] --> B["Filter in collect_output_devices()"]
+    B --> C["Filter in list_output_device_names() for UI parity"]
+    C --> D["Add unit test with synthetic device names"]
+    D --> E["Manual test: multi-speaker ON, Test adhan once"]
+    E --> F["Rebuild + reinstall .deb"]
+    </div>
+  </div>
+
+  <ol>
+    <li>Edit <code>src-tauri/src/audio_output.rs</code>: add filter helper; use it in device enumeration.</li>
+    <li>Add Rust unit tests for name filtering (<code>Monitor of …</code> rejected, normal names kept).</li>
+    <li>Optionally update Settings hint to say virtual devices are automatically excluded.</li>
+    <li>Rebuild: <code>pnpm tauri build</code></li>
+    <li>Reinstall the <code>.deb</code> and verify Test adhan plays exactly once with multi-speaker enabled.</li>
+  </ol>
+
+  <h2>8. Expected result after fix</h2>
+
+  <div class="callout ok">
+    <strong>With multi-speaker ON on Linux:</strong> one playback thread per <em>physical</em> output
+    (e.g. laptop speakers + HDMI monitor), but no duplicate loopback through
+    <code>Monitor of …</code> sinks.<br><br>
+    <strong>With multi-speaker OFF:</strong> unchanged — single default output, one play (already correct).
+  </div>
+
+  <h2>9. Files to change</h2>
+
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>src-tauri/src/audio_output.rs</code></td><td>Filter virtual devices; fallback logic; tests</td></tr>
+      <tr><td><code>src/views/SettingsView.vue</code></td><td>Optional: update hint text after filter exists</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Prayer Time · double-play bug analysis — open this file in a browser for rendered diagrams.
+  </footer>
+
+</div>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#1c232c",
+      primaryColor: "#1c232c",
+      primaryBorderColor: "#f85149",
+      primaryTextColor: "#e6edf3",
+      lineColor: "#58a6ff",
+      fontSize: "14px"
+    },
+    flowchart: { curve: "basis", padding: 12 }
+  });
+</script>
+</body>
+</html>

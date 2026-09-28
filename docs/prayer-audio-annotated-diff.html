@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prayer audio &amp; UI refactor — Annotated diff</title>
+  <style>
+    :root {
+      --bg: #050a14;
+      --panel: #0a1628;
+      --blue: #00d4ff;
+      --blue-dim: #0099cc;
+      --yellow: #ffe566;
+      --yellow-dim: #ccb833;
+      --text: #e8f4ff;
+      --muted: #8ab4d4;
+      --del: #ff6b8a;
+      --add: #5dffa8;
+      --border: rgba(0, 212, 255, 0.35);
+      --glow-blue: 0 0 12px rgba(0, 212, 255, 0.45), 0 0 32px rgba(0, 212, 255, 0.15);
+      --glow-yellow: 0 0 10px rgba(255, 229, 102, 0.5), 0 0 24px rgba(255, 229, 102, 0.2);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      background-image:
+        radial-gradient(ellipse at 10% 0%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 90% 100%, rgba(255, 229, 102, 0.06) 0%, transparent 45%);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    header {
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--yellow);
+      background: var(--panel);
+      padding: 1.5rem 1.75rem;
+      border-radius: 8px;
+      box-shadow: var(--glow-blue);
+      margin-bottom: 2rem;
+    }
+    h1 { margin: 0 0 0.5rem; font-size: 1.65rem; color: var(--blue); text-shadow: var(--glow-blue); letter-spacing: 0.02em; }
+    .meta { color: var(--muted); font-size: 0.9rem; }
+    .meta strong { color: var(--yellow); }
+    h2 {
+      color: var(--yellow); font-size: 1.15rem; margin: 2.5rem 0 1rem;
+      text-shadow: var(--glow-yellow); border-bottom: 1px solid rgba(255, 229, 102, 0.3); padding-bottom: 0.4rem;
+    }
+    p { color: var(--muted); margin: 0.75rem 0; }
+    p.lead { color: var(--text); font-size: 1.02rem; }
+    table {
+      width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.88rem;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; box-shadow: var(--glow-blue);
+    }
+    th {
+      background: rgba(0, 212, 255, 0.12); color: var(--blue); text-align: left;
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+      font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.75rem;
+    }
+    td { padding: 0.7rem 1rem; border-bottom: 1px solid rgba(0, 212, 255, 0.12); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(0, 212, 255, 0.04); }
+    .risk-high { color: #ff8fa3; font-weight: 600; }
+    .risk-low { color: var(--add); }
+    .risk-med { color: var(--yellow); }
+    .block {
+      margin: 2rem 0; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; background: var(--panel); box-shadow: var(--glow-blue);
+    }
+    .block-header {
+      background: linear-gradient(90deg, rgba(0, 212, 255, 0.15), rgba(255, 229, 102, 0.08));
+      padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+    }
+    .intent-id {
+      display: inline-block; background: rgba(255, 229, 102, 0.15); color: var(--yellow);
+      border: 1px solid rgba(255, 229, 102, 0.4); padding: 0.15rem 0.55rem; border-radius: 4px;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-bottom: 0.4rem;
+      box-shadow: var(--glow-yellow);
+    }
+    .block-header h3 { margin: 0.25rem 0 0.35rem; color: var(--blue); font-size: 1rem; }
+    .block-header p { margin: 0; font-size: 0.9rem; color: var(--muted); }
+    .files { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.78rem; color: var(--yellow-dim); margin-top: 0.5rem; }
+    pre {
+      margin: 0; padding: 1rem 1.25rem; overflow-x: auto;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 0.8rem; line-height: 1.55; background: #030810;
+    }
+    .del { color: var(--del); }
+    .add { color: var(--add); }
+    .ctx { color: var(--text); }
+    .fname { color: var(--blue); margin-bottom: 0.5rem; display: block; }
+    footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Prayer audio &amp; UI refactor — Annotated diff</h1>
+      <p class="meta">Branch <strong>main</strong> · ~25 files (14 tracked + 9 new/untracked) · tracked text ~+77 / −1230 lines · Generated 2026-06-13</p>
+      <p class="lead" style="margin-top:1rem;">
+        This pass adds spoken Piper TTS adhan sounds, a Rust multi-speaker audio layer with a double-play fix,
+        and splits the monolithic Vue UI into routed Home and Settings views. Similar edits are grouped below;
+        each block maps to one row in the intent table. Large deletions in <code>App.vue</code> are mostly a move
+        into <code>HomeView.vue</code> (new file), not removed functionality.
+      </p>
+    </header>
+
+    <h2>Intent table (grouped changes)</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Intent</th><th>Files</th><th>Runtime impact</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>G1</strong></td>
+          <td>Extract audio playback into <code>audio_output.rs</code>; add Tauri commands for multi-speaker prefs and device listing; wire scheduler + test playback through shared <code>play_sound()</code></td>
+          <td><code>src-tauri/src/audio_output.rs</code>, <code>audio_commands.rs</code>, <code>prayer_scheduler.rs</code>, <code>lib.rs</code>, <code>allow-prayer-commands.toml</code></td>
+          <td>Yes — new playback paths, optional all-device output</td>
+        </tr>
+        <tr>
+          <td><strong>G2</strong></td>
+          <td>Filter virtual loopback sinks (<code>Monitor of …</code>) to stop adhan playing twice on Linux when multi-speaker is enabled</td>
+          <td><code>src-tauri/src/audio_output.rs</code>, <code>src/views/SettingsView.vue</code></td>
+          <td>Yes — changes which devices receive audio</td>
+        </tr>
+        <tr>
+          <td><strong>G3</strong></td>
+          <td>Introduce vue-router; move home UI to <code>HomeView.vue</code>; add Settings page with test adhan + multi-speaker toggle</td>
+          <td><code>src/App.vue</code>, <code>src/views/*</code>, <code>src/router.ts</code>, <code>src/main.ts</code>, <code>src/composables/*</code>, <code>package.json</code></td>
+          <td>Yes — new navigation and settings UX</td>
+        </tr>
+        <tr>
+          <td><strong>G4</strong></td>
+          <td>Replace placeholder MP3s with Piper TTS spoken announcements (<code>piper_announce_low</code> pack); add generation scripts</td>
+          <td><code>src-tauri/sounds/*.mp3</code>, <code>README.md</code>, <code>scripts/generate_sounds_piper.py</code>, <code>scripts/generate_sounds.py</code></td>
+          <td>Yes — audible adhan content and duration change (~3–6 s vs ~1 s placeholders)</td>
+        </tr>
+        <tr>
+          <td><strong>F1</strong></td>
+          <td>Gitignore generated audio scratch dirs, Piper venv, and voice models; add <code>vue-router</code> dependency</td>
+          <td><code>.gitignore</code>, <code>package.json</code>, <code>pnpm-lock.yaml</code></td>
+          <td>None</td>
+        </tr>
+        <tr>
+          <td><strong>D1</strong></td>
+          <td>Unit tests for physical output device name filtering</td>
+          <td><code>src-tauri/src/audio_output.rs</code> (tests mod)</td>
+          <td>None</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Risks</h2>
+    <table>
+      <thead>
+        <tr><th>Area</th><th>Risk</th><th>Severity</th><th>Mitigation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>multi-speaker</code> (G1, G2)</td>
+          <td>Legitimate secondary outputs (HDMI, Bluetooth) may still play simultaneously — intended, but can surprise users</td>
+          <td class="risk-med">Medium</td>
+          <td>Test with multi-speaker ON/OFF in Settings; list devices before enabling</td>
+        </tr>
+        <tr>
+          <td><code>device-filter</code> (G2)</td>
+          <td>Name heuristics (<code>monitor</code>, <code>loopback</code>) could exclude a oddly-named real device</td>
+          <td class="risk-low">Low</td>
+          <td>Unit tests cover common patterns; extend filter list if user reports missing device</td>
+        </tr>
+        <tr>
+          <td><code>audio-assets</code> (G4)</td>
+          <td>Piper voice quality / pronunciation may vary; binary MP3s bloat git diff</td>
+          <td class="risk-low">Low</td>
+          <td>Regenerate via <code>scripts/generate_sounds_piper.py</code>; audition packs in <code>sounds_generated/</code></td>
+        </tr>
+        <tr>
+          <td><code>routing</code> (G3)</td>
+          <td>Hash router (<code>#/settings</code>) changes URL shape vs single-page app</td>
+          <td class="risk-low">Low</td>
+          <td>Smoke-test Home → Settings → back navigation and deep links</td>
+        </tr>
+        <tr>
+          <td><code>permissions</code> (G1)</td>
+          <td>New Tauri commands must stay in <code>allow-prayer-commands.toml</code> or invoke fails at runtime</td>
+          <td class="risk-med">Medium</td>
+          <td>Verify Settings page loads device list without permission errors</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- G1 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">G1</span>
+        <h3>Multi-speaker audio backend module</h3>
+        <p>
+          Playback logic moved out of <code>prayer_scheduler.rs</code> into a dedicated
+          <code>audio_output</code> module. Tauri commands expose multi-speaker preference and device
+          enumeration. Both scheduled alarms and manual test playback call the same
+          <code>play_sound(path, multi_speaker)</code> entry point.
+        </p>
+        <div class="files">src-tauri/src/audio_output.rs · audio_commands.rs · prayer_scheduler.rs · lib.rs · allow-prayer-commands.toml</div>
+      </div>
+      <pre><span class="fname">--- src-tauri/src/prayer_scheduler.rs</span>
+<span class="del">-pub fn play_sound_file(path: &amp;Path) -&gt; Result&lt;(), String&gt; {</span>
+<span class="del">-    use rodio::{Decoder, OutputStream, Sink};</span>
+<span class="del">-    // ... inline rodio playback ...</span>
+<span class="del">-}</span>
+<span class="add">+use crate::audio_output::{play_sound, AudioPreferences};</span>
+<span class="ctx"> fn trigger_alarm(...) {</span>
+<span class="add">+    let multi_speaker = app.try_state::&lt;AudioPreferences&gt;()</span>
+<span class="add">+        .map(|p| is_multi_speaker_enabled(&amp;p)).unwrap_or(false);</span>
+<span class="del">-        if let Err(e) = play_sound_file(&amp;path) {</span>
+<span class="add">+        if let Err(e) = play_sound(&amp;path, multi_speaker) {</span>
+
+<span class="fname">--- src-tauri/src/audio_output.rs (new)</span>
+<span class="add">+pub fn play_sound(path: &amp;Path, multi_speaker: bool) -&gt; Result&lt;(), String&gt; {</span>
+<span class="add">+    if !multi_speaker { return play_sound_default(path); }</span>
+<span class="add">+    let devices = collect_output_devices()?;</span>
+<span class="add">+    // spawn one thread per physical device when len &gt;= 2</span>
+<span class="add">+}</span>
+
+<span class="fname">--- src-tauri/src/lib.rs</span>
+<span class="add">+mod audio_commands;</span>
+<span class="add">+mod audio_output;</span>
+<span class="add">+app.manage(AudioPreferences(Default::default()));</span>
+<span class="add">+set_multi_speaker_enabled, list_audio_output_devices</span>
+
+<span class="fname">--- src-tauri/permissions/allow-prayer-commands.toml</span>
+<span class="add">+  "set_multi_speaker_enabled",</span>
+<span class="add">+  "list_audio_output_devices"</span></pre>
+    </div>
+
+    <!-- G2 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">G2</span>
+        <h3>Virtual device filter — double-play fix</h3>
+        <p>
+          On Linux/PipeWire, CPAL often lists <code>Monitor of …</code> loopback sinks alongside real
+          speakers. Multi-speaker mode was playing on both, causing the adhan to be heard twice.
+          <code>is_physical_output()</code> excludes monitor/loopback/null/dummy names before playback
+          and in the Settings device list.
+        </p>
+        <div class="files">src-tauri/src/audio_output.rs · src/views/SettingsView.vue</div>
+      </div>
+      <pre><span class="fname">--- src-tauri/src/audio_output.rs</span>
+<span class="add">+fn is_physical_output(name: &amp;str) -&gt; bool {</span>
+<span class="add">+    let n = name.to_ascii_lowercase();</span>
+<span class="add">+    !n.contains("monitor") &amp;&amp; !n.contains("loopback")</span>
+<span class="add">+        &amp;&amp; !n.contains("null") &amp;&amp; !n.contains("dummy")</span>
+<span class="add">+}</span>
+<span class="ctx"> fn collect_output_devices() {</span>
+<span class="add">+    .filter(|d| d.name().map(|n| is_physical_output(&amp;n)).unwrap_or(false))</span>
+
+<span class="fname">--- src/views/SettingsView.vue</span>
+<span class="add">+        تُستبعد تلقائياً الأجهزة الافتراضية (مثل Monitor of …) لتجنّب تشغيل الصوت مرتين.</span></pre>
+    </div>
+
+    <!-- G3 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">G3</span>
+        <h3>Vue router + Settings page split</h3>
+        <p>
+          <code>App.vue</code> shrinks to a <code>&lt;router-view /&gt;</code> shell. The former ~800-line
+          home UI moves to <code>HomeView.vue</code> (new). A Settings route adds multi-speaker toggle,
+          device list, and test adhan. Composables <code>useMultiSpeaker</code> and
+          <code>useTestAdhan</code> share logic between views.
+        </p>
+        <div class="files">src/App.vue · src/views/HomeView.vue · SettingsView.vue · src/router.ts · src/main.ts · src/composables/*</div>
+      </div>
+      <pre><span class="fname">--- src/App.vue</span>
+<span class="del">-&lt;script setup lang="ts"&gt;</span>
+<span class="del">-// ~800 lines: prayer times, mini mode, notifications, scheduler sync ...</span>
+<span class="add">+&lt;script setup lang="ts"&gt;&lt;/script&gt;</span>
+<span class="add">+&lt;template&gt;&lt;router-view /&gt;&lt;/template&gt;</span>
+
+<span class="fname">--- src/main.ts</span>
+<span class="add">+import router from "./router";</span>
+<span class="del">-createApp(App).mount("#app");</span>
+<span class="add">+createApp(App).use(router).mount("#app");</span>
+
+<span class="fname">--- src/router.ts (new)</span>
+<span class="add">+routes: [</span>
+<span class="add">+  { path: "/", component: HomeView },</span>
+<span class="add">+  { path: "/settings", component: SettingsView },</span>
+<span class="add">+]</span>
+
+<span class="fname">--- src/composables/useMultiSpeaker.ts (new)</span>
+<span class="add">+watch(multiSpeakerEnabled, (enabled) =&gt; {</span>
+<span class="add">+  localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0");</span>
+<span class="add">+  invoke("set_multi_speaker_enabled", { enabled });</span>
+<span class="add">+});</span>
+
+<span class="fname">--- src/composables/useTestAdhan.ts (new)</span>
+<span class="add">+await invoke("play_prayer_sound", { prayer });</span></pre>
+    </div>
+
+    <!-- G4 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">G4</span>
+        <h3>Piper TTS spoken prayer sounds</h3>
+        <p>
+          Five placeholder MP3s (~11 KB each) replaced with Piper-generated spoken Arabic
+          announcements using voice <code>ar_JO-kareem-low</code>. Phrase:
+          "حان الآن موعد أذان صلاة …" (Fajr adds الصلاة خير من النوم). Generation scripts
+          produce multiple variation packs under <code>sounds_generated/</code> for audition.
+        </p>
+        <div class="files">src-tauri/sounds/*.mp3 · README.md · scripts/generate_sounds_piper.py · scripts/generate_sounds.py</div>
+      </div>
+      <pre><span class="fname">--- src-tauri/sounds/ (binary)</span>
+<span class="del">- fajer.mp3   11 019 bytes (placeholder)</span>
+<span class="add">+ fajer.mp3  126 765 bytes (Piper, ~6.3 s)</span>
+<span class="del">- dhuhr.mp3   11 019 bytes</span>
+<span class="add">+ dhuhr.mp3   69 885 bytes (~3.5 s)</span>
+<span class="ctx"> (×5 prayers — asr, maghrib, isha similarly updated)</span>
+
+<span class="fname">--- scripts/generate_sounds_piper.py (new, excerpt)</span>
+<span class="add">+VARIATIONS = {</span>
+<span class="add">+    "piper_announce_low": dict(</span>
+<span class="add">+        voice="low",</span>
+<span class="add">+        template="حانَ الآنَ موعِدُ أذانِ صلاةِ {name}.",</span>
+<span class="add">+    ), ...</span>
+<span class="add">+}</span>
+<span class="add">+voice.synthesize_wav(text, wf, syn_config=syn)</span>
+
+<span class="fname">--- src-tauri/sounds/README.md</span>
+<span class="add">+These files are spoken Arabic announcements generated locally with Piper TTS</span>
+<span class="add">+(voice ar_JO-kareem-low, with tashkeel auto-diacritization).</span></pre>
+    </div>
+
+    <!-- F1 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">F1</span>
+        <h3>Toolchain &amp; gitignore housekeeping</h3>
+        <p>
+          Keeps generated audition packs, Piper venv, and 63 MB ONNX models out of git.
+          Adds <code>vue-router</code> as a runtime dependency for the new Settings route.
+        </p>
+        <div class="files">.gitignore · package.json · pnpm-lock.yaml</div>
+      </div>
+      <pre><span class="fname">--- .gitignore</span>
+<span class="add">+sounds_generated/</span>
+<span class="add">+.venv-piper/</span>
+<span class="add">+models/piper/</span>
+
+<span class="fname">--- package.json</span>
+<span class="add">+    "vue-router": "^4.6.4"</span></pre>
+    </div>
+
+    <!-- D1 -->
+    <div class="block">
+      <div class="block-header">
+        <span class="intent-id">D1</span>
+        <h3>Audio output unit tests</h3>
+        <p>
+          Three tests in <code>audio_output.rs</code>: device enumeration does not panic;
+          virtual sink names are rejected; real device names are kept. Run with
+          <code>cargo test audio_output</code>.
+        </p>
+        <div class="files">src-tauri/src/audio_output.rs (mod tests)</div>
+      </div>
+      <pre><span class="fname">--- src-tauri/src/audio_output.rs</span>
+<span class="add">+    #[test]</span>
+<span class="add">+    fn is_physical_output_rejects_virtual_sinks() {</span>
+<span class="add">+        assert!(!is_physical_output("Monitor of Built-in Audio Analog Stereo"));</span>
+<span class="add">+        assert!(!is_physical_output("Loopback PCM"));</span>
+<span class="add">+    }</span>
+<span class="add">+    #[test]</span>
+<span class="add">+    fn is_physical_output_keeps_real_devices() {</span>
+<span class="add">+        assert!(is_physical_output("Built-in Audio Analog Stereo"));</span>
+<span class="add">+        assert!(is_physical_output("HDMI / DisplayPort Audio"));</span>
+<span class="add">+    }</span></pre>
+    </div>
+
+    <footer>
+      Open this file in a browser for the neon-styled view. Verify with
+      <code>cargo test audio_output</code>,
+      <code>pnpm build</code>,
+      <code>pnpm tauri build</code>,
+      then launch the app → Settings → Test adhan (once, not twice).
+    </footer>
+  </div>
+</body>
+</html>

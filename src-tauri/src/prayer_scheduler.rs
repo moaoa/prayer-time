@@ -1,7 +1,9 @@
+use crate::audio_commands::is_multi_speaker_enabled;
+use crate::audio_output::{play_sound, AudioPreferences};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -78,29 +80,18 @@ fn resolve_sound_path(app: &AppHandle, prayer: &str) -> Option<PathBuf> {
     None
 }
 
-pub fn play_sound_file(path: &Path) -> Result<(), String> {
-    use rodio::{Decoder, OutputStream, Sink};
-    use std::fs::File;
-    use std::io::BufReader;
-
-    let (_stream, stream_handle) =
-        OutputStream::try_default().map_err(|e| format!("audio output: {e}"))?;
-    let sink = Sink::try_new(&stream_handle).map_err(|e| format!("audio sink: {e}"))?;
-    let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
-    let source = Decoder::new(BufReader::new(file)).map_err(|e| format!("decode: {e}"))?;
-    sink.append(source);
-    sink.sleep_until_end();
-    Ok(())
-}
-
 fn trigger_alarm(app: &AppHandle, alarm: &PrayerAlarm, now_ms: i64) {
     if should_play_sound(now_ms, alarm.time_ms) {
         let prayer = alarm.name.clone();
         let app_for_audio = app.clone();
+        let multi_speaker = app
+            .try_state::<AudioPreferences>()
+            .map(|p| is_multi_speaker_enabled(&p))
+            .unwrap_or(false);
 
         std::thread::spawn(move || {
             if let Some(path) = resolve_sound_path(&app_for_audio, &prayer) {
-                if let Err(e) = play_sound_file(&path) {
+                if let Err(e) = play_sound(&path, multi_speaker) {
                     eprintln!("[prayer-alarm] failed to play {}: {e}", path.display());
                 }
             } else {
@@ -175,11 +166,16 @@ pub fn sync_prayer_schedule(
 }
 
 #[tauri::command]
-pub fn play_prayer_sound(prayer: String, app: AppHandle) -> Result<(), String> {
+pub fn play_prayer_sound(
+    prayer: String,
+    app: AppHandle,
+    prefs: State<'_, AudioPreferences>,
+) -> Result<(), String> {
     let path = resolve_sound_path(&app, &prayer)
         .ok_or_else(|| format!("no sound file found for prayer: {prayer}"))?;
+    let multi_speaker = is_multi_speaker_enabled(&prefs);
     std::thread::spawn(move || {
-        if let Err(e) = play_sound_file(&path) {
+        if let Err(e) = play_sound(&path, multi_speaker) {
             eprintln!("[play_prayer_sound] {e}");
         }
     });
