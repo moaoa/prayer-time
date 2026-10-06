@@ -12,6 +12,7 @@ import {
   getCurrentWindow,
   LogicalPosition,
   LogicalSize,
+  PhysicalPosition,
 } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
@@ -95,6 +96,23 @@ const prayerOrder = ["fajer", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
 
+// Logical CSS pixels only. Older saves used physical pixels from outerSize(),
+// which on Windows (scale factor > 1) restores as a wrong logical size and
+// clips the Test Adhan / Settings row. New keys avoid reading those values.
+const NORMAL_BOUNDS_KEY = "normalBoundsLogical";
+const MINI_BOUNDS_KEY = "miniBoundsLogical";
+const MIN_NORMAL_WIDTH = 420;
+const MIN_NORMAL_HEIGHT = 560;
+
+function boundsFitNormalWindow(bounds: WindowBounds): boolean {
+  return (
+    bounds.width >= MIN_NORMAL_WIDTH &&
+    bounds.height >= MIN_NORMAL_HEIGHT &&
+    bounds.width <= 4000 &&
+    bounds.height <= 2500
+  );
+}
+
 let unlistenMoved: null | (() => void) = null;
 let unlistenResized: null | (() => void) = null;
 let snapDebounceTimer: number | null = null;
@@ -126,8 +144,12 @@ function writeBounds(key: string, bounds: WindowBounds) {
 async function getCurrentBounds(): Promise<WindowBounds | null> {
   try {
     const win = getCurrentWindow();
-    const pos = await win.outerPosition();
-    const size = await win.outerSize();
+    // outerSize/outerPosition are physical pixels. Passing them to
+    // LogicalSize/LogicalPosition is a no-op at scale 1 (typical Linux) and
+    // mis-sizes the window on Windows DPI scaling.
+    const factor = await win.scaleFactor();
+    const pos = (await win.outerPosition()).toLogical(factor);
+    const size = (await win.outerSize()).toLogical(factor);
     return {
       x: pos.x,
       y: pos.y,
@@ -144,9 +166,15 @@ async function applyMiniModeWindowBehavior(enabled: boolean) {
 
   if (enabled) {
     const bounds = await getCurrentBounds();
-    if (bounds) writeBounds("normalBounds", bounds);
+    // window-state may already have restored the mini size before JS runs.
+    // Saving that as the "normal" size leaves the full UI in a short window
+    // where the action buttons are clipped.
+    if (bounds && boundsFitNormalWindow(bounds)) {
+      writeBounds(NORMAL_BOUNDS_KEY, bounds);
+    }
 
     try {
+      await win.setMinSize(new LogicalSize(200, 64));
       await win.setDecorations(false);
       await win.setAlwaysOnTop(true);
       await win.setResizable(false);
@@ -154,8 +182,14 @@ async function applyMiniModeWindowBehavior(enabled: boolean) {
       console.warn("[mini-mode] Failed to apply window flags", e);
     }
 
-    const miniBounds = readBounds("miniBounds");
-    if (miniBounds) {
+    const miniBounds = readBounds(MINI_BOUNDS_KEY);
+    if (
+      miniBounds &&
+      miniBounds.width >= 180 &&
+      miniBounds.width <= 800 &&
+      miniBounds.height >= 64 &&
+      miniBounds.height <= 220
+    ) {
       await win.setSize(new LogicalSize(miniBounds.width, miniBounds.height));
       await win.setPosition(new LogicalPosition(miniBounds.x, miniBounds.y));
     } else {
@@ -166,16 +200,39 @@ async function applyMiniModeWindowBehavior(enabled: boolean) {
       await win.setResizable(true);
       await win.setAlwaysOnTop(false);
       await win.setDecorations(true);
+      await win.setMinSize(
+        new LogicalSize(MIN_NORMAL_WIDTH, MIN_NORMAL_HEIGHT)
+      );
     } catch (e) {
       console.warn("[mini-mode] Failed to restore window flags", e);
     }
 
-    const normalBounds = readBounds("normalBounds");
-    if (normalBounds) {
+    const normalBounds = readBounds(NORMAL_BOUNDS_KEY);
+    if (normalBounds && boundsFitNormalWindow(normalBounds)) {
       await win.setSize(
         new LogicalSize(normalBounds.width, normalBounds.height)
       );
-      await win.setPosition(new LogicalPosition(normalBounds.x, normalBounds.y));
+      await win.setPosition(
+        new LogicalPosition(normalBounds.x, normalBounds.y)
+      );
+    } else {
+      try {
+        const factor = await win.scaleFactor();
+        const inner = (await win.innerSize()).toLogical(factor);
+        if (
+          inner.width < MIN_NORMAL_WIDTH ||
+          inner.height < MIN_NORMAL_HEIGHT
+        ) {
+          await win.setSize(
+            new LogicalSize(
+              Math.max(inner.width, 850),
+              Math.max(inner.height, MIN_NORMAL_HEIGHT)
+            )
+          );
+        }
+      } catch (e) {
+        console.warn("[mini-mode] Failed to enforce normal window size", e);
+      }
     }
   }
 }
@@ -234,7 +291,7 @@ async function snapMiniWindowToEdgeIfNear() {
 
   isSnapping = true;
   try {
-    await win.setPosition(new LogicalPosition(newX, newY));
+    await win.setPosition(new PhysicalPosition(newX, newY));
   } finally {
     isSnapping = false;
   }
@@ -243,7 +300,7 @@ async function snapMiniWindowToEdgeIfNear() {
 async function persistMiniBounds() {
   if (!isMiniMode.value) return;
   const bounds = await getCurrentBounds();
-  if (bounds) writeBounds("miniBounds", bounds);
+  if (bounds) writeBounds(MINI_BOUNDS_KEY, bounds);
 }
 
 const todayPrayerTimings = computed(() => {
@@ -844,12 +901,14 @@ const translateCityNameToArabic = (name: string) => {
 .container {
   margin: 0;
   padding: 20px;
-  min-height: 100vh;
+  min-height: 100%;
+  box-sizing: border-box;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   font-family: "Arial", sans-serif;
   position: relative;
   transition: all 0.3s ease;
+  color-scheme: light;
 }
 
 .container.compact {
@@ -963,6 +1022,8 @@ const translateCityNameToArabic = (name: string) => {
 .header {
   text-align: center;
   margin-bottom: 30px;
+  position: relative;
+  z-index: 5;
 }
 
 .header h1 {
@@ -986,18 +1047,31 @@ const translateCityNameToArabic = (name: string) => {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
   gap: 10px;
   margin-top: 12px;
+  /* If the Windows client area is shorter than the header (DPI, title bar,
+     or a restored mini size), keep Test Adhan and Settings on screen. */
+  position: sticky;
+  bottom: 12px;
+  z-index: 30;
+  flex-shrink: 0;
 }
 
 .settings-link {
-  background: rgba(255, 255, 255, 0.2);
-  border: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 10px;
-  color: white;
+  color: #fff;
   padding: 8px 16px;
   font-size: 1rem;
+  line-height: 1.2;
+  min-height: 36px;
+  flex: 0 0 auto;
   cursor: pointer;
+  font-family: "Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol", Arial, sans-serif;
 }
 
 .settings-link:hover:not(:disabled) {
@@ -1030,6 +1104,8 @@ const translateCityNameToArabic = (name: string) => {
   padding: 30px;
   margin-bottom: 30px;
   text-align: center;
+  position: relative;
+  z-index: 1;
 }
 
 .compact .next-prayer {
@@ -1189,6 +1265,8 @@ const translateCityNameToArabic = (name: string) => {
   backdrop-filter: blur(10px);
   border-radius: 20px;
   padding: 30px;
+  position: relative;
+  z-index: 1;
 }
 
 .all-prayers h3 {

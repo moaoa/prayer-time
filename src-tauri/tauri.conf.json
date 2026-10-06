@@ -14,7 +14,8 @@
       {
         "title": "Libya Prayer Times",
         "width": 850,
-        "height": 600
+        "height": 600,
+        "theme": "Light"
       }
     ],
     "security": {
